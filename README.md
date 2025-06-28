@@ -78,11 +78,23 @@ treefmt
 ```
 src/
 ├── main.zig          # Executable entry point
-├── root.zig          # Library with OZ solver implementation
+├── root.zig          # Public API re-exports and tests
+├── potentials.zig    # Interaction potential interface and implementations
+├── grid.zig          # Grid parameters and radial function data structures
+├── convergence.zig   # Convergence acceleration algorithms
+└── solver.zig        # Main OZ equation solver with closure relations
 tests/
 ├── integration_test.zig  # Integration tests
 build.zig             # Build configuration with C library linking
 ```
+
+### Module Organization
+
+- **`potentials.zig`**: Extensible potential interface with Hard Sphere and Lennard-Jones implementations
+- **`grid.zig`**: Radial grid discretization, correlation functions, and BLAS-integrated vectors  
+- **`convergence.zig`**: Convergence acceleration methods (simple mixing, adaptive mixing, Anderson)
+- **`solver.zig`**: Core OZ equation solver with closure relations and FFT-based algorithms
+- **`root.zig`**: Clean public API that re-exports all modules for easy consumption
 
 ## Mathematical Background
 
