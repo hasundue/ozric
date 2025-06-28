@@ -54,8 +54,9 @@
         }:
         let
           treefmt = lib.treefmt-nix.mkWrapper pkgs {
-            programs.nixfmt = {
-              enable = true;
+            programs = {
+              nixfmt.enable = true;
+              zig.enable = true;
             };
           };
 
