@@ -9,7 +9,7 @@ zig-out/
 .zig-cache/
 
 # Output data files
-output/
+out/
 *.csv
 *.json
 *_summary.txt

@@ -31,6 +31,7 @@ The repository uses direnv with two flakes:
 - Pre-commit hooks automatically run `treefmt` on commit
 - Currently configured for Nix files; will need Zig formatting when source code is added
 - Use `treefmt --fail-on-change --no-cache` to check formatting
+- **Always run treefmt before commiting**
 
 ## Architecture
 
@@ -80,3 +81,4 @@ build.zig             # Build configuration
 - Project uses C mathematics libraries: BLAS, LAPACK, FFTW3
 - Tests include both unit tests (in src files) and integration tests (tests/ directory)
 - Development environment loads from `../nvim#zig`, suggesting a shared Neovim+Zig setup
+```
