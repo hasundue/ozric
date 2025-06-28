@@ -17,6 +17,23 @@ pub const SolverMethod = enum {
     fft_based, // Proper FFT-based solver
 };
 
+/// Convergence acceleration methods
+pub const ConvergenceMethod = enum {
+    simple_mixing, // Basic linear mixing
+    adaptive_mixing, // Adaptive mixing factor
+    anderson, // Anderson acceleration
+};
+
+/// Convergence control parameters
+pub const ConvergenceParams = struct {
+    method: ConvergenceMethod = .adaptive_mixing,
+    initial_mixing: f64 = 0.1,
+    min_mixing: f64 = 0.01,
+    max_mixing: f64 = 0.5,
+    anderson_depth: usize = 5, // Number of previous iterations to use
+    error_increase_factor: f64 = 2.0, // Reduce mixing if error increases by this factor
+};
+
 /// Potential function interface
 pub const Potential = struct {
     const Self = @This();
@@ -153,6 +170,12 @@ pub const Solver = struct {
     beta: f64, // β = 1/(kB*T), inverse thermal energy
     potential: ?Potential, // Interaction potential u(r)
 
+    // Convergence acceleration
+    convergence_params: ConvergenceParams,
+    iteration_history: ?[][]f64, // For Anderson acceleration
+    error_history: ?[]f64, // Error tracking
+    current_mixing: f64, // Adaptive mixing factor
+
     const Self = @This();
 
     pub fn init(allocator: std.mem.Allocator, grid: GridParams) !Self {
@@ -183,6 +206,10 @@ pub const Solver = struct {
             .temperature = 0.0,
             .beta = 0.0,
             .potential = null,
+            .convergence_params = ConvergenceParams{},
+            .iteration_history = null,
+            .error_history = null,
+            .current_mixing = 0.1,
         };
     }
 
@@ -196,6 +223,15 @@ pub const Solver = struct {
         }
         if (self.fft_plan_backward) |plan| {
             c.fftw_destroy_plan(@ptrCast(plan));
+        }
+        if (self.iteration_history) |history| {
+            for (history) |iter_data| {
+                self.allocator.free(iter_data);
+            }
+            self.allocator.free(history);
+        }
+        if (self.error_history) |errors| {
+            self.allocator.free(errors);
         }
         self.h_r.deinit();
         self.c_r.deinit();
@@ -241,6 +277,95 @@ pub const Solver = struct {
         self.initSystem(density, temperature, lj_potential.toPotential());
     }
 
+    /// Improved initial guess using mean field theory approximation
+    pub fn initMeanFieldGuess(self: *Self) void {
+        const potential = self.potential orelse return;
+
+        for (0..self.grid.n_points) |i| {
+            const r = self.g_r.getRadius(i);
+            const u_r = potential.evaluate(r);
+
+            if (std.math.isInf(u_r) and u_r > 0) {
+                // Hard core repulsion
+                self.g_r.values[i] = 0.0;
+            } else if (std.math.isFinite(u_r)) {
+                // Mean field approximation: g(r) ≈ exp(-βu_eff(r))
+                // where u_eff includes mean field correction
+                const mean_field_correction = self.density * 0.1; // Rough approximation
+                const u_eff = u_r + mean_field_correction;
+
+                self.g_r.values[i] = @exp(-self.beta * u_eff);
+
+                // Clamp to reasonable values
+                if (self.g_r.values[i] > 5.0) self.g_r.values[i] = 5.0;
+                if (self.g_r.values[i] < 0.01) self.g_r.values[i] = 0.01;
+            } else {
+                self.g_r.values[i] = 0.01;
+            }
+
+            self.h_r.values[i] = self.g_r.values[i] - 1.0;
+        }
+    }
+
+    /// Initialize with Percus-Yevick analytical solution for hard spheres (better guess)
+    pub fn initPYHardSphereGuess(self: *Self, sigma: f64) void {
+        const eta = std.math.pi * self.density * sigma * sigma * sigma / 6.0; // packing fraction
+
+        if (eta > 0.5) {
+            // Too dense, fall back to simple guess
+            self.initMeanFieldGuess();
+            return;
+        }
+
+        // PY hard sphere approximation
+        const alpha = (1.0 + 2.0 * eta) * (1.0 + 2.0 * eta) / ((1.0 - eta) * (1.0 - eta) * (1.0 - eta) * (1.0 - eta));
+        const beta_hs = -6.0 * eta * (1.0 + eta / 2.0) / ((1.0 - eta) * (1.0 - eta) * (1.0 - eta));
+
+        for (0..self.grid.n_points) |i| {
+            const r = self.g_r.getRadius(i);
+
+            if (r < sigma) {
+                self.g_r.values[i] = 0.0;
+            } else if (r < 2.0 * sigma) {
+                // Contact region with PY approximation
+                const x = r / sigma;
+                self.g_r.values[i] = alpha + beta_hs * (x - 1.0);
+                if (self.g_r.values[i] < 0.01) self.g_r.values[i] = 0.01;
+            } else {
+                // Long range: approach 1 exponentially
+                const decay = @exp(-(r - 2.0 * sigma) / sigma);
+                self.g_r.values[i] = 1.0 + 0.1 * decay;
+            }
+
+            self.h_r.values[i] = self.g_r.values[i] - 1.0;
+        }
+    }
+
+    /// Configure convergence acceleration parameters
+    pub fn setConvergenceParams(self: *Self, params: ConvergenceParams) void {
+        self.convergence_params = params;
+        self.current_mixing = params.initial_mixing;
+    }
+
+    /// Initialize convergence acceleration (Anderson method)
+    fn initConvergenceAcceleration(self: *Self) !void {
+        if (self.convergence_params.method != .anderson) return;
+        if (self.iteration_history != null) return; // Already initialized
+
+        const depth = self.convergence_params.anderson_depth;
+        const n_points = self.grid.n_points;
+
+        // Allocate history arrays
+        const history = try self.allocator.alloc([]f64, depth);
+        for (0..depth) |i| {
+            history[i] = try self.allocator.alloc(f64, n_points);
+        }
+        self.iteration_history = history;
+
+        const errors = try self.allocator.alloc(f64, depth);
+        self.error_history = errors;
+    }
+
     /// Initialize FFT plans for FFT-based solver
     pub fn initFFT(self: *Self) !void {
         if (self.fft_workspace != null) return; // Already initialized
@@ -262,15 +387,17 @@ pub const Solver = struct {
 
     /// Solve the Ornstein-Zernike equation using specified closure relation and method
     pub fn solve(self: *Self, closure: ClosureType, method: SolverMethod, max_iterations: usize, tolerance: f64) !void {
-        std.log.info("Starting OZ equation solution with {} closure using {} method...", .{ closure, method });
+        std.log.info("Starting OZ equation solution with {} closure using {} method and {} convergence...", .{ closure, method, self.convergence_params.method });
 
-        // Initialize FFT if using FFT-based method
+        // Initialize acceleration methods
         if (method == .fft_based) {
             try self.initFFT();
         }
+        try self.initConvergenceAcceleration();
 
         var iteration: usize = 0;
         var err: f64 = std.math.inf(f64);
+        var prev_err: f64 = std.math.inf(f64);
 
         while (iteration < max_iterations and err > tolerance) {
             // Store old h(r) for convergence check
@@ -287,6 +414,9 @@ pub const Solver = struct {
                 .fft_based => try self.solveOZEquationFFT(),
             }
 
+            // Apply convergence acceleration before updating g(r)
+            try self.applyConvergenceAcceleration(old_h, iteration);
+
             // Update g(r) = h(r) + 1
             for (0..self.grid.n_points) |i| {
                 self.g_r.values[i] = self.h_r.values[i] + 1.0;
@@ -300,10 +430,22 @@ pub const Solver = struct {
             }
             err = @sqrt(err / @as(f64, @floatFromInt(self.grid.n_points)));
 
+            // Adaptive mixing based on error trend
+            if (self.convergence_params.method == .adaptive_mixing) {
+                if (err > prev_err * self.convergence_params.error_increase_factor) {
+                    // Error increased significantly, reduce mixing
+                    self.current_mixing = @max(self.current_mixing * 0.5, self.convergence_params.min_mixing);
+                } else if (err < prev_err * 0.9) {
+                    // Good progress, slightly increase mixing
+                    self.current_mixing = @min(self.current_mixing * 1.1, self.convergence_params.max_mixing);
+                }
+            }
+
+            prev_err = err;
             iteration += 1;
 
-            if (iteration % 100 == 0) {
-                std.log.info("Iteration {}: error = {d:.6}", .{ iteration, err });
+            if (iteration % 50 == 0) {
+                std.log.info("Iteration {}: error = {d:.6}, mixing = {d:.3}", .{ iteration, err, self.current_mixing });
             }
         }
 
@@ -311,6 +453,81 @@ pub const Solver = struct {
             std.log.info("Converged after {} iterations with error {d:.6}", .{ iteration, err });
         } else {
             std.log.warn("Failed to converge after {} iterations, final error: {d:.6}", .{ max_iterations, err });
+        }
+    }
+
+    /// Apply convergence acceleration to h(r)
+    fn applyConvergenceAcceleration(self: *Self, old_h: []f64, iteration: usize) !void {
+        switch (self.convergence_params.method) {
+            .simple_mixing => {
+                // Basic linear mixing: h_new = α*h_new + (1-α)*h_old
+                const alpha = self.convergence_params.initial_mixing;
+                for (0..self.grid.n_points) |i| {
+                    const new_value = alpha * self.h_r.values[i] + (1.0 - alpha) * old_h[i];
+                    self.h_r.values[i] = if (std.math.isFinite(new_value)) new_value else old_h[i];
+                }
+            },
+            .adaptive_mixing => {
+                // Adaptive mixing with current mixing factor
+                const alpha = self.current_mixing;
+                for (0..self.grid.n_points) |i| {
+                    const new_value = alpha * self.h_r.values[i] + (1.0 - alpha) * old_h[i];
+                    self.h_r.values[i] = if (std.math.isFinite(new_value)) new_value else old_h[i];
+                }
+            },
+            .anderson => {
+                // Anderson acceleration (simplified implementation)
+                if (iteration < self.convergence_params.anderson_depth) {
+                    // Not enough history yet, use simple mixing
+                    const alpha = self.convergence_params.initial_mixing;
+                    for (0..self.grid.n_points) |i| {
+                        self.h_r.values[i] = alpha * self.h_r.values[i] + (1.0 - alpha) * old_h[i];
+                    }
+
+                    // Store in history
+                    if (self.iteration_history) |history| {
+                        const idx = iteration % self.convergence_params.anderson_depth;
+                        @memcpy(history[idx], self.h_r.values);
+                    }
+                } else {
+                    // Apply Anderson acceleration (simplified)
+                    try self.andersonAcceleration(old_h, iteration);
+                }
+            },
+        }
+    }
+
+    /// Simplified Anderson acceleration
+    fn andersonAcceleration(self: *Self, old_h: []f64, iteration: usize) !void {
+        const history = self.iteration_history orelse return;
+        const depth = @min(iteration, self.convergence_params.anderson_depth);
+        const idx = iteration % self.convergence_params.anderson_depth;
+
+        // Store current iteration
+        @memcpy(history[idx], self.h_r.values);
+
+        // Simple Anderson mixing: average of last few iterations with adaptive weights
+        @memset(self.h_r.values, 0.0);
+
+        var total_weight: f64 = 0.0;
+        for (0..depth) |i| {
+            const weight = 1.0 / @as(f64, @floatFromInt(i + 1)); // Decreasing weights for older iterations
+            total_weight += weight;
+
+            for (0..self.grid.n_points) |j| {
+                self.h_r.values[j] += weight * history[(idx + i) % self.convergence_params.anderson_depth][j];
+            }
+        }
+
+        // Normalize
+        for (0..self.grid.n_points) |i| {
+            self.h_r.values[i] /= total_weight;
+        }
+
+        // Apply some mixing with old value for stability
+        const alpha = 0.1;
+        for (0..self.grid.n_points) |i| {
+            self.h_r.values[i] = alpha * self.h_r.values[i] + (1.0 - alpha) * old_h[i];
         }
     }
 
@@ -372,8 +589,6 @@ pub const Solver = struct {
         // Simplified OZ solution without FFT for initial implementation
         // In a real solver, this would use FFT for proper convolution
 
-        const mixing_factor = 0.3;
-
         // Copy old h(r) to workspace
         @memcpy(self.workspace, self.h_r.values);
 
@@ -393,8 +608,8 @@ pub const Solver = struct {
                 }
             }
 
-            const new_h = self.c_r.values[i] + self.density * integral_approx / (r * r + 0.01);
-            self.h_r.values[i] = mixing_factor * new_h + (1.0 - mixing_factor) * self.workspace[i];
+            // Update h(r) directly (mixing will be applied by convergence acceleration)
+            self.h_r.values[i] = self.c_r.values[i] + self.density * integral_approx / (r * r + 0.01);
         }
     }
 
@@ -436,18 +651,14 @@ pub const Solver = struct {
             c.fftw_execute(@ptrCast(plan));
         }
 
-        // Extract h(r) and apply mixing for stability
-        const mixing_factor = 0.2;
+        // Extract h(r) (mixing will be applied by convergence acceleration)
         const norm_factor = 1.0 / @as(f64, @floatFromInt(n));
 
         for (0..n) |i| {
             const r = self.h_r.getRadius(i);
 
             // Extract h(r) from r*h(r) and normalize
-            const new_h = if (r > 0.01) fft_ws[i] * norm_factor / r else 0.0;
-
-            // Apply mixing for numerical stability
-            self.h_r.values[i] = mixing_factor * new_h + (1.0 - mixing_factor) * self.h_r.values[i];
+            self.h_r.values[i] = if (r > 0.01) fft_ws[i] * norm_factor / r else 0.0;
         }
     }
 };
@@ -514,7 +725,7 @@ test "solver initialization" {
     defer solver.deinit();
 
     solver.initHardSphere(0.8, 1.0, 1.0);
-    try solver.solve(.percus_yevick, .simple_convolution, 10, 1e-6);
+    try solver.solve(.percus_yevick, .simple_convolution, 100, 1e-6);
 }
 
 test "FFT solver comparison" {
@@ -527,14 +738,14 @@ test "FFT solver comparison" {
     defer solver_simple.deinit();
 
     solver_simple.initHardSphere(0.5, 1.0, 1.0); // Lower density for better convergence
-    try solver_simple.solve(.percus_yevick, .simple_convolution, 5, 1e-3);
+    try solver_simple.solve(.percus_yevick, .simple_convolution, 50, 1e-3);
 
     // Test FFT-based method
     var solver_fft = try Solver.init(allocator, grid);
     defer solver_fft.deinit();
 
     solver_fft.initHardSphere(0.5, 1.0, 1.0);
-    try solver_fft.solve(.percus_yevick, .fft_based, 5, 1e-3);
+    try solver_fft.solve(.percus_yevick, .fft_based, 50, 1e-3);
 
     // Both methods should produce reasonable results (no crashes, finite values)
     for (0..10) |i| {
@@ -550,9 +761,21 @@ test "Lennard-Jones potential with PY closure" {
     var solver = try Solver.init(allocator, grid);
     defer solver.deinit();
 
-    // LJ parameters: reduced units (ε=0.1, σ=1) - weaker interaction for stability
-    solver.initLennardJones(0.1, 5.0, 0.1, 1.0); // Very low density, very high temperature
-    try solver.solve(.percus_yevick, .simple_convolution, 2, 1e-1); // Loose convergence
+    // LJ parameters: moderate conditions for numerical stability
+    // density=0.3, temperature=2.0, epsilon=1.0, sigma=1.0
+    solver.initLennardJones(0.3, 2.0, 1.0, 1.0);
+
+    // Use conservative convergence parameters
+    const stable_params = ConvergenceParams{
+        .method = .adaptive_mixing,
+        .initial_mixing = 0.05, // Very conservative mixing
+        .min_mixing = 0.001,
+        .max_mixing = 0.2,
+        .error_increase_factor = 1.2,
+    };
+    solver.setConvergenceParams(stable_params);
+
+    try solver.solve(.percus_yevick, .simple_convolution, 50, 1e-2); // More iterations, looser tolerance
 
     // Should produce finite results (at least the first few points)
     for (0..3) |i| {
@@ -577,4 +800,57 @@ test "potential evaluation" {
 
     const u_at_minimum = lj_potential.evaluate(1.122); // At minimum ≈ 2^(1/6)σ
     try std.testing.expect(u_at_minimum < 0.0); // Should be attractive
+}
+
+test "convergence acceleration comparison" {
+    const allocator = std.testing.allocator;
+
+    const grid = GridParams.init(128, 6.0);
+
+    // Test with simple mixing
+    var solver_simple = try Solver.init(allocator, grid);
+    defer solver_simple.deinit();
+
+    const simple_params = ConvergenceParams{
+        .method = .simple_mixing,
+        .initial_mixing = 0.1,
+    };
+    solver_simple.setConvergenceParams(simple_params);
+    solver_simple.initHardSphere(0.6, 1.0, 1.0); // Slightly lower density for better convergence
+    try solver_simple.solve(.percus_yevick, .simple_convolution, 150, 1e-4);
+
+    // Test with adaptive mixing
+    var solver_adaptive = try Solver.init(allocator, grid);
+    defer solver_adaptive.deinit();
+
+    const adaptive_params = ConvergenceParams{
+        .method = .adaptive_mixing,
+        .initial_mixing = 0.15,
+        .min_mixing = 0.01,
+        .max_mixing = 0.4,
+        .error_increase_factor = 1.5, // More sensitive to error increases
+    };
+    solver_adaptive.setConvergenceParams(adaptive_params);
+    solver_adaptive.initHardSphere(0.6, 1.0, 1.0);
+    try solver_adaptive.solve(.percus_yevick, .simple_convolution, 150, 1e-4);
+
+    // Test with Anderson acceleration
+    var solver_anderson = try Solver.init(allocator, grid);
+    defer solver_anderson.deinit();
+
+    const anderson_params = ConvergenceParams{
+        .method = .anderson,
+        .anderson_depth = 4, // Slightly more history
+        .initial_mixing = 0.15,
+    };
+    solver_anderson.setConvergenceParams(anderson_params);
+    solver_anderson.initHardSphere(0.6, 1.0, 1.0);
+    try solver_anderson.solve(.percus_yevick, .simple_convolution, 150, 1e-4);
+
+    // All methods should produce finite results
+    for (0..5) |i| {
+        try std.testing.expect(std.math.isFinite(solver_simple.h_r.values[i]));
+        try std.testing.expect(std.math.isFinite(solver_adaptive.h_r.values[i]));
+        try std.testing.expect(std.math.isFinite(solver_anderson.h_r.values[i]));
+    }
 }
