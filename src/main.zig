@@ -11,8 +11,8 @@ pub fn main() !void {
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    std.debug.print("🧪 Ozric - Ornstein-Zernike Equation Solver", .{});
-    std.debug.print("", .{});
+    std.debug.print("🧪 Ozric - Ornstein-Zernike Equation Solver\n", .{});
+    std.debug.print("\n", .{});
 
     // Parse command line arguments
     const args = try std.process.argsAlloc(allocator);
@@ -75,8 +75,8 @@ fn printUsage() void {
 }
 
 fn runHardSphereExample(allocator: std.mem.Allocator, output_dir: []const u8) !void {
-    std.log.info("🔴 Hard Sphere System Example", .{});
-    std.log.info("", .{});
+    std.debug.print("🔴 Hard Sphere System Example\n", .{});
+    std.debug.print("\n", .{});
 
     const grid = ozric.GridParams.init(256, 8.0);
     var solver = try ozric.Solver.init(allocator, grid);
@@ -87,11 +87,11 @@ fn runHardSphereExample(allocator: std.mem.Allocator, output_dir: []const u8) !v
     const temperature = 1.0;
     const sigma = 1.0;
 
-    std.log.info("System parameters:", .{});
-    std.log.info("  Density (ρ):     {d:.3}", .{density});
-    std.log.info("  Temperature (T): {d:.3}", .{temperature});
-    std.log.info("  Diameter (σ):    {d:.3}", .{sigma});
-    std.log.info("", .{});
+    std.debug.print("System parameters:\n", .{});
+    std.debug.print("  Density (ρ):     {d:.3}\n", .{density});
+    std.debug.print("  Temperature (T): {d:.3}\n", .{temperature});
+    std.debug.print("  Diameter (σ):    {d:.3}\n", .{sigma});
+    std.debug.print("\n", .{});
 
     solver.initHardSphere(density, temperature, sigma);
 
@@ -104,7 +104,7 @@ fn runHardSphereExample(allocator: std.mem.Allocator, output_dir: []const u8) !v
     };
     solver.setConvergenceParams(params);
 
-    std.log.info("🔧 Solving OZ equation...", .{});
+    std.debug.print("🔧 Solving OZ equation...\n", .{});
     try solver.solve(.percus_yevick, .simple_convolution, 100, 1e-5);
 
     // Display results
@@ -114,7 +114,7 @@ fn runHardSphereExample(allocator: std.mem.Allocator, output_dir: []const u8) !v
     try ozric.export_data.plotRadialDistribution(&solver, 60, 15);
 
     // Export data
-    std.log.info("💾 Exporting data...", .{});
+    std.debug.print("💾 Exporting data...\n", .{});
 
     // Ensure output directory exists
     std.fs.cwd().makeDir(output_dir) catch |err| switch (err) {
@@ -136,15 +136,15 @@ fn runHardSphereExample(allocator: std.mem.Allocator, output_dir: []const u8) !v
     defer allocator.free(summary_path);
     try ozric.export_data.exportSummaryStats(&solver, summary_path);
 
-    std.log.info("✅ Files saved:", .{});
-    std.log.info("  - {s}/hard_sphere_rdf.csv     (CSV data)", .{output_dir});
-    std.log.info("  - {s}/hard_sphere_rdf.json    (JSON data)", .{output_dir});
-    std.log.info("  - {s}/hard_sphere_summary.txt (Statistics)", .{output_dir});
+    std.debug.print("✅ Files saved:\n", .{});
+    std.debug.print("  - {s}/hard_sphere_rdf.csv     (CSV data)\n", .{output_dir});
+    std.debug.print("  - {s}/hard_sphere_rdf.json    (JSON data)\n", .{output_dir});
+    std.debug.print("  - {s}/hard_sphere_summary.txt (Statistics)\n", .{output_dir});
 }
 
 fn runLennardJonesExample(allocator: std.mem.Allocator, output_dir: []const u8) !void {
-    std.log.info("⚛️  Lennard-Jones System Example", .{});
-    std.log.info("", .{});
+    std.debug.print("⚛️  Lennard-Jones System Example\n", .{});
+    std.debug.print("\n", .{});
 
     const grid = ozric.GridParams.init(256, 8.0);
     var solver = try ozric.Solver.init(allocator, grid);
@@ -156,12 +156,12 @@ fn runLennardJonesExample(allocator: std.mem.Allocator, output_dir: []const u8) 
     const epsilon = 1.0;
     const sigma = 1.0;
 
-    std.log.info("System parameters:", .{});
-    std.log.info("  Density (ρ):     {d:.3}", .{density});
-    std.log.info("  Temperature (T): {d:.3}", .{temperature});
-    std.log.info("  Energy (ε):      {d:.3}", .{epsilon});
-    std.log.info("  Length (σ):      {d:.3}", .{sigma});
-    std.log.info("", .{});
+    std.debug.print("System parameters:\n", .{});
+    std.debug.print("  Density (ρ):     {d:.3}\n", .{density});
+    std.debug.print("  Temperature (T): {d:.3}\n", .{temperature});
+    std.debug.print("  Energy (ε):      {d:.3}\n", .{epsilon});
+    std.debug.print("  Length (σ):      {d:.3}\n", .{sigma});
+    std.debug.print("\n", .{});
 
     solver.initLennardJones(density, temperature, epsilon, sigma);
 
@@ -175,7 +175,7 @@ fn runLennardJonesExample(allocator: std.mem.Allocator, output_dir: []const u8) 
     };
     solver.setConvergenceParams(params);
 
-    std.log.info("🔧 Solving OZ equation...", .{});
+    std.debug.print("🔧 Solving OZ equation...\n", .{});
     try solver.solve(.percus_yevick, .simple_convolution, 150, 1e-4);
 
     // Display results
@@ -185,7 +185,7 @@ fn runLennardJonesExample(allocator: std.mem.Allocator, output_dir: []const u8) 
     try ozric.export_data.plotRadialDistribution(&solver, 60, 15);
 
     // Export data
-    std.log.info("💾 Exporting data...", .{});
+    std.debug.print("💾 Exporting data...\n", .{});
 
     // Ensure output directory exists
     std.fs.cwd().makeDir(output_dir) catch |err| switch (err) {
@@ -207,15 +207,15 @@ fn runLennardJonesExample(allocator: std.mem.Allocator, output_dir: []const u8) 
     defer allocator.free(summary_path);
     try ozric.export_data.exportSummaryStats(&solver, summary_path);
 
-    std.log.info("✅ Files saved:", .{});
-    std.log.info("  - {s}/lennard_jones_rdf.csv     (CSV data)", .{output_dir});
-    std.log.info("  - {s}/lennard_jones_rdf.json    (JSON data)", .{output_dir});
-    std.log.info("  - {s}/lennard_jones_summary.txt (Statistics)", .{output_dir});
+    std.debug.print("✅ Files saved:\n", .{});
+    std.debug.print("  - {s}/lennard_jones_rdf.csv     (CSV data)\n", .{output_dir});
+    std.debug.print("  - {s}/lennard_jones_rdf.json    (JSON data)\n", .{output_dir});
+    std.debug.print("  - {s}/lennard_jones_summary.txt (Statistics)\n", .{output_dir});
 }
 
 fn runMethodComparison(allocator: std.mem.Allocator, output_dir: []const u8) !void {
-    std.log.info("⚖️  Solver Method Comparison", .{});
-    std.log.info("", .{});
+    std.debug.print("⚖️  Solver Method Comparison\n", .{});
+    std.debug.print("\n", .{});
 
     const grid = ozric.GridParams.init(128, 6.0);
 
@@ -224,12 +224,12 @@ fn runMethodComparison(allocator: std.mem.Allocator, output_dir: []const u8) !vo
     const temperature = 1.0;
     const sigma = 1.0;
 
-    std.log.info("Comparing simple convolution vs FFT-based solver", .{});
-    std.log.info("System: Hard spheres, ρ={d:.2}, T={d:.2}", .{ density, temperature });
-    std.log.info("", .{});
+    std.debug.print("Comparing simple convolution vs FFT-based solver\n", .{});
+    std.debug.print("System: Hard spheres, ρ={d:.2}, T={d:.2}\n", .{ density, temperature });
+    std.debug.print("\n", .{});
 
     // Simple convolution method
-    std.log.info("🔄 Testing simple convolution method...", .{});
+    std.debug.print("🔄 Testing simple convolution method...\n", .{});
     var solver_simple = try ozric.Solver.init(allocator, grid);
     defer solver_simple.deinit();
 
@@ -239,7 +239,7 @@ fn runMethodComparison(allocator: std.mem.Allocator, output_dir: []const u8) !vo
     const time_simple = std.time.milliTimestamp() - start_simple;
 
     // FFT-based method
-    std.log.info("🌊 Testing FFT-based method...", .{});
+    std.debug.print("🌊 Testing FFT-based method...\n", .{});
     var solver_fft = try ozric.Solver.init(allocator, grid);
     defer solver_fft.deinit();
 
@@ -249,16 +249,16 @@ fn runMethodComparison(allocator: std.mem.Allocator, output_dir: []const u8) !vo
     const time_fft = std.time.milliTimestamp() - start_fft;
 
     // Compare results
-    std.log.info("⏱️  Performance comparison:", .{});
-    std.log.info("  Simple convolution: {}ms", .{time_simple});
-    std.log.info("  FFT-based:          {}ms", .{time_fft});
-    std.log.info("", .{});
+    std.debug.print("⏱️  Performance comparison:\n", .{});
+    std.debug.print("  Simple convolution: {}ms\n", .{time_simple});
+    std.debug.print("  FFT-based:          {}ms\n", .{time_fft});
+    std.debug.print("\n", .{});
 
     // Show both results briefly
-    std.log.info("📊 Simple convolution g(r):", .{});
+    std.debug.print("📊 Simple convolution g(r):\n", .{});
     ozric.export_data.displayRadialFunctions(&solver_simple, 8);
 
-    std.log.info("📊 FFT-based g(r):", .{});
+    std.debug.print("📊 FFT-based g(r):\n", .{});
     ozric.export_data.displayRadialFunctions(&solver_fft, 8);
 
     // Export comparison data
@@ -277,7 +277,7 @@ fn runMethodComparison(allocator: std.mem.Allocator, output_dir: []const u8) !vo
     defer allocator.free(fft_path);
     try ozric.export_data.exportRadialData(allocator, &solver_fft, fft_path, csv_config);
 
-    std.log.info("✅ Comparison files saved:", .{});
-    std.log.info("  - {s}/comparison_simple.csv (Simple convolution)", .{output_dir});
-    std.log.info("  - {s}/comparison_fft.csv    (FFT-based)", .{output_dir});
+    std.debug.print("✅ Comparison files saved:\n", .{});
+    std.debug.print("  - {s}/comparison_simple.csv (Simple convolution)\n", .{output_dir});
+    std.debug.print("  - {s}/comparison_fft.csv    (FFT-based)\n", .{output_dir});
 }

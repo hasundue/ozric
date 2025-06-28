@@ -129,14 +129,14 @@ pub fn displayRadialFunctions(
 ) void {
     const points_to_show = max_points orelse @min(20, oz_solver.grid.n_points);
 
-    std.log.info("=== Ornstein-Zernike Solution Results ===", .{});
-    std.log.info("System: ρ={d:.3}, T={d:.3}, β={d:.3}", .{ oz_solver.density, oz_solver.temperature, oz_solver.beta });
-    std.log.info("Grid: {} points, r_max={d:.2}, dr={d:.4}", .{ oz_solver.grid.n_points, oz_solver.grid.r_max, oz_solver.grid.dr });
-    std.log.info("", .{});
+    std.debug.print("=== Ornstein-Zernike Solution Results ===\n", .{});
+    std.debug.print("System: ρ={d:.3}, T={d:.3}, β={d:.3}\n", .{ oz_solver.density, oz_solver.temperature, oz_solver.beta });
+    std.debug.print("Grid: {} points, r_max={d:.2}, dr={d:.4}\n", .{ oz_solver.grid.n_points, oz_solver.grid.r_max, oz_solver.grid.dr });
+    std.debug.print("\n", .{});
 
     // Header
-    std.log.info("    r         g_r         h_r         c_r", .{});
-    std.log.info("---------------------------------------------", .{});
+    std.debug.print("    r         g_r         h_r         c_r\n", .{});
+    std.debug.print("---------------------------------------------\n", .{});
 
     // Data rows
     for (0..points_to_show) |i| {
@@ -145,13 +145,13 @@ pub fn displayRadialFunctions(
         const h_r = oz_solver.h_r.values[i];
         const c_r = oz_solver.c_r.values[i];
 
-        std.log.info("{d:8.4}  {d:10.6}  {d:10.6}  {d:10.6}", .{ r, g_r, h_r, c_r });
+        std.debug.print("{d:8.4}  {d:10.6}  {d:10.6}  {d:10.6}\n", .{ r, g_r, h_r, c_r });
     }
 
     if (points_to_show < oz_solver.grid.n_points) {
-        std.log.info("... ({} more points)", .{oz_solver.grid.n_points - points_to_show});
+        std.debug.print("... ({} more points)\n", .{oz_solver.grid.n_points - points_to_show});
     }
-    std.log.info("", .{});
+    std.debug.print("\n", .{});
 }
 
 /// Create a simple ASCII plot of g(r)
@@ -177,9 +177,9 @@ pub fn plotRadialDistribution(
     max_g = @min(max_g, 5.0);
     min_g = @max(min_g, 0.0);
 
-    std.log.info("=== g(r) ASCII Plot ===", .{});
-    std.log.info("Range: g(r) ∈ [{d:.2}, {d:.2}]", .{ min_g, max_g });
-    std.log.info("", .{});
+    std.debug.print("=== g(r) ASCII Plot ===\n", .{});
+    std.debug.print("Range: g(r) ∈ [{d:.2}, {d:.2}]\n", .{ min_g, max_g });
+    std.debug.print("\n", .{});
 
     // Create plot matrix
     const plot = try allocator.alloc([]u8, height);
@@ -210,7 +210,7 @@ pub fn plotRadialDistribution(
     // Print plot with y-axis labels
     for (0..height) |i| {
         const y_val = max_g - (@as(f64, @floatFromInt(i)) / @as(f64, @floatFromInt(height - 1))) * (max_g - min_g);
-        std.log.info("{d:5.2} |{s}", .{ y_val, plot[i] });
+        std.debug.print("{d:5.2} |{s}\n", .{ y_val, plot[i] });
     }
 
     // Print x-axis
@@ -218,10 +218,10 @@ pub fn plotRadialDistribution(
     defer allocator.free(dash_line);
     @memset(dash_line, '-');
     dash_line[width] = 0;
-    std.log.info("      +{s}", .{dash_line});
-    std.log.info("      0{s}{d:.2}", .{ "      ", oz_solver.grid.r_max });
-    std.log.info("              r", .{});
-    std.log.info("", .{});
+    std.debug.print("      +{s}\n", .{dash_line});
+    std.debug.print("      0{s}{d:.2}\n", .{ "      ", oz_solver.grid.r_max });
+    std.debug.print("              r\n", .{});
+    std.debug.print("\n", .{});
 }
 
 /// Export summary statistics
