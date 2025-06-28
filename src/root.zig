@@ -4,6 +4,7 @@ const std = @import("std");
 pub const potentials = @import("potentials.zig");
 pub const grid = @import("grid.zig");
 pub const convergence = @import("convergence.zig");
+pub const closures = @import("closures.zig");
 pub const solver = @import("solver.zig");
 pub const export_data = @import("export.zig");
 

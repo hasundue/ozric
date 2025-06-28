@@ -8,6 +8,7 @@ const c = @cImport({
 const potentials = @import("potentials.zig");
 const grid = @import("grid.zig");
 const convergence = @import("convergence.zig");
+const closures = @import("closures.zig");
 
 pub const Potential = potentials.Potential;
 pub const HardSpherePotential = potentials.HardSpherePotential;
@@ -18,10 +19,7 @@ pub const ConvergenceParams = convergence.ConvergenceParams;
 pub const ConvergenceAccelerator = convergence.ConvergenceAccelerator;
 
 /// Closure relation types for OZ equation
-pub const ClosureType = enum {
-    hypernetted_chain, // HNC: c(r) = h(r) - ln(g(r)) - βu(r)
-    percus_yevick, // PY: c(r) = (1 - exp(βu(r))) * g(r)
-};
+pub const ClosureType = closures.ClosureType;
 
 /// Solver method types
 pub const SolverMethod = enum {
@@ -287,51 +285,10 @@ pub const Solver = struct {
         for (0..self.grid.n_points) |i| {
             const r = self.c_r.getRadius(i);
             const u_r = potential.evaluate(r);
+            const beta_u = self.beta * u_r;
 
-            switch (closure) {
-                .hypernetted_chain => {
-                    // HNC: c(r) = h(r) - ln(g(r)) - βu(r)
-                    if (self.g_r.values[i] > 0.0) {
-                        const beta_u = self.beta * u_r;
-                        // Handle infinite potentials properly in HNC
-                        if (std.math.isInf(beta_u)) {
-                            // For infinite potentials, HNC gives specific behavior
-                            if (beta_u > 0) {
-                                // Repulsive infinite potential: c(r) = h(r) - ln(g(r)) - ∞
-                                self.c_r.values[i] = self.h_r.values[i] - @log(self.g_r.values[i]) - 1e10;
-                            } else {
-                                // Attractive infinite potential (shouldn't happen)
-                                self.c_r.values[i] = self.h_r.values[i] - @log(self.g_r.values[i]) + 1e10;
-                            }
-                        } else {
-                            // Normal case with finite potential
-                            self.c_r.values[i] = self.h_r.values[i] - @log(self.g_r.values[i]) - beta_u;
-                        }
-                    } else {
-                        // g(r) ≤ 0: HNC becomes problematic, use limiting case
-                        self.c_r.values[i] = self.h_r.values[i];
-                    }
-                },
-                .percus_yevick => {
-                    // PY: c(r) = (1 - exp(βu(r))) * g(r)
-                    const beta_u = self.beta * u_r;
-
-                    if (std.math.isInf(beta_u)) {
-                        // For infinite potentials
-                        if (beta_u > 0) {
-                            // Repulsive infinite potential: exp(βu) → ∞, so (1 - exp(βu)) → -∞
-                            self.c_r.values[i] = -self.g_r.values[i];
-                        } else {
-                            // Attractive infinite potential: exp(βu) → 0, so (1 - exp(βu)) → 1
-                            self.c_r.values[i] = self.g_r.values[i];
-                        }
-                    } else {
-                        // Normal case with finite potential
-                        const exp_beta_u = @exp(beta_u);
-                        self.c_r.values[i] = (1.0 - exp_beta_u) * self.g_r.values[i];
-                    }
-                },
-            }
+            // Use the dedicated closure functions
+            self.c_r.values[i] = closures.applyClosure(closure, self.g_r.values[i], self.h_r.values[i], beta_u);
         }
     }
 
