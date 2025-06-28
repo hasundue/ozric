@@ -105,7 +105,7 @@ fn runHardSphereExample(allocator: std.mem.Allocator, output_dir: []const u8) !v
     solver.setConvergenceParams(params);
 
     std.debug.print("🔧 Solving OZ equation...\n", .{});
-    try solver.solve(.percus_yevick, .simple_convolution, 100, 1e-5);
+    try solver.solve(.percus_yevick, .fft_based, 100, 1e-5);
 
     // Display results
     ozric.export_data.displayRadialFunctions(&solver, 15);
@@ -176,7 +176,7 @@ fn runLennardJonesExample(allocator: std.mem.Allocator, output_dir: []const u8) 
     solver.setConvergenceParams(params);
 
     std.debug.print("🔧 Solving OZ equation...\n", .{});
-    try solver.solve(.percus_yevick, .simple_convolution, 150, 1e-4);
+    try solver.solve(.percus_yevick, .fft_based, 150, 1e-4);
 
     // Display results
     ozric.export_data.displayRadialFunctions(&solver, 15);
