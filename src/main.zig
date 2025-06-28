@@ -42,7 +42,7 @@ fn printUsage() void {
     std.log.info("  comparison     - Compare different solver methods", .{});
     std.log.info("  help           - Show this help message", .{});
     std.log.info("", .{});
-    std.log.info("Output files will be saved to the current directory.", .{});
+    std.log.info("Output files will be saved to the 'output/' directory.", .{});
 }
 
 fn runHardSphereExample(allocator: std.mem.Allocator) !void {
@@ -86,18 +86,25 @@ fn runHardSphereExample(allocator: std.mem.Allocator) !void {
 
     // Export data
     std.log.info("💾 Exporting data...", .{});
+
+    // Ensure output directory exists
+    std.fs.cwd().makeDir("output") catch |err| switch (err) {
+        error.PathAlreadyExists => {},
+        else => return err,
+    };
+
     const csv_config = ozric.export_data.ExportConfig{ .format = .csv, .precision = 6 };
-    try ozric.export_data.exportRadialData(allocator, &solver, "hard_sphere_rdf.csv", csv_config);
+    try ozric.export_data.exportRadialData(allocator, &solver, "output/hard_sphere_rdf.csv", csv_config);
 
     const json_config = ozric.export_data.ExportConfig{ .format = .json, .precision = 6 };
-    try ozric.export_data.exportRadialData(allocator, &solver, "hard_sphere_rdf.json", json_config);
+    try ozric.export_data.exportRadialData(allocator, &solver, "output/hard_sphere_rdf.json", json_config);
 
-    try ozric.export_data.exportSummaryStats(&solver, "hard_sphere_summary.txt");
+    try ozric.export_data.exportSummaryStats(&solver, "output/hard_sphere_summary.txt");
 
     std.log.info("✅ Files saved:", .{});
-    std.log.info("  - hard_sphere_rdf.csv     (CSV data)", .{});
-    std.log.info("  - hard_sphere_rdf.json    (JSON data)", .{});
-    std.log.info("  - hard_sphere_summary.txt (Statistics)", .{});
+    std.log.info("  - output/hard_sphere_rdf.csv     (CSV data)", .{});
+    std.log.info("  - output/hard_sphere_rdf.json    (JSON data)", .{});
+    std.log.info("  - output/hard_sphere_summary.txt (Statistics)", .{});
 }
 
 fn runLennardJonesExample(allocator: std.mem.Allocator) !void {
@@ -144,18 +151,25 @@ fn runLennardJonesExample(allocator: std.mem.Allocator) !void {
 
     // Export data
     std.log.info("💾 Exporting data...", .{});
+
+    // Ensure output directory exists
+    std.fs.cwd().makeDir("output") catch |err| switch (err) {
+        error.PathAlreadyExists => {},
+        else => return err,
+    };
+
     const csv_config = ozric.export_data.ExportConfig{ .format = .csv, .precision = 6 };
-    try ozric.export_data.exportRadialData(allocator, &solver, "lennard_jones_rdf.csv", csv_config);
+    try ozric.export_data.exportRadialData(allocator, &solver, "output/lennard_jones_rdf.csv", csv_config);
 
     const json_config = ozric.export_data.ExportConfig{ .format = .json, .precision = 6 };
-    try ozric.export_data.exportRadialData(allocator, &solver, "lennard_jones_rdf.json", json_config);
+    try ozric.export_data.exportRadialData(allocator, &solver, "output/lennard_jones_rdf.json", json_config);
 
-    try ozric.export_data.exportSummaryStats(&solver, "lennard_jones_summary.txt");
+    try ozric.export_data.exportSummaryStats(&solver, "output/lennard_jones_summary.txt");
 
     std.log.info("✅ Files saved:", .{});
-    std.log.info("  - lennard_jones_rdf.csv     (CSV data)", .{});
-    std.log.info("  - lennard_jones_rdf.json    (JSON data)", .{});
-    std.log.info("  - lennard_jones_summary.txt (Statistics)", .{});
+    std.log.info("  - output/lennard_jones_rdf.csv     (CSV data)", .{});
+    std.log.info("  - output/lennard_jones_rdf.json    (JSON data)", .{});
+    std.log.info("  - output/lennard_jones_summary.txt (Statistics)", .{});
 }
 
 fn runMethodComparison(allocator: std.mem.Allocator) !void {
@@ -207,11 +221,16 @@ fn runMethodComparison(allocator: std.mem.Allocator) !void {
     ozric.export_data.displayRadialFunctions(&solver_fft, 8);
 
     // Export comparison data
+    std.fs.cwd().makeDir("output") catch |err| switch (err) {
+        error.PathAlreadyExists => {},
+        else => return err,
+    };
+
     const csv_config = ozric.export_data.ExportConfig{ .format = .csv, .precision = 6 };
-    try ozric.export_data.exportRadialData(allocator, &solver_simple, "comparison_simple.csv", csv_config);
-    try ozric.export_data.exportRadialData(allocator, &solver_fft, "comparison_fft.csv", csv_config);
+    try ozric.export_data.exportRadialData(allocator, &solver_simple, "output/comparison_simple.csv", csv_config);
+    try ozric.export_data.exportRadialData(allocator, &solver_fft, "output/comparison_fft.csv", csv_config);
 
     std.log.info("✅ Comparison files saved:", .{});
-    std.log.info("  - comparison_simple.csv (Simple convolution)", .{});
-    std.log.info("  - comparison_fft.csv    (FFT-based)", .{});
+    std.log.info("  - output/comparison_simple.csv (Simple convolution)", .{});
+    std.log.info("  - output/comparison_fft.csv    (FFT-based)", .{});
 }

@@ -7,3 +7,9 @@ result-*
 zig-cache/
 zig-out/
 .zig-cache/
+
+# Output data files
+output/
+*.csv
+*.json
+*_summary.txt
