@@ -6,6 +6,7 @@ pub const grid = @import("grid.zig");
 pub const convergence = @import("convergence.zig");
 pub const closures = @import("closures.zig");
 pub const solver = @import("solver.zig");
+pub const exact = @import("exact.zig");
 pub const export_data = @import("export.zig");
 
 // Re-export commonly used types for convenience

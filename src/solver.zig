@@ -9,6 +9,7 @@ const potentials = @import("potentials.zig");
 const grid = @import("grid.zig");
 const convergence = @import("convergence.zig");
 const closures = @import("closures.zig");
+const exact = @import("exact.zig");
 
 pub const Potential = potentials.Potential;
 pub const HardSpherePotential = potentials.HardSpherePotential;
@@ -46,6 +47,8 @@ pub const Solver = struct {
     temperature: f64,
     beta: f64, // β = 1/(kB*T), inverse thermal energy
     potential: ?Potential, // Interaction potential u(r)
+    hs_potential_data: ?HardSpherePotential, // Storage for hard sphere potential data
+    lj_potential_data: ?LennardJonesPotential, // Storage for LJ potential data
 
     // Convergence acceleration
     accelerator: ConvergenceAccelerator,
@@ -70,6 +73,8 @@ pub const Solver = struct {
             .temperature = 0.0,
             .beta = 0.0,
             .potential = null,
+            .hs_potential_data = null,
+            .lj_potential_data = null,
             .accelerator = ConvergenceAccelerator.init(allocator, ConvergenceParams{}),
         };
     }
@@ -104,17 +109,21 @@ pub const Solver = struct {
 
     /// Initialize system with hard sphere potential
     pub fn initHardSphere(self: *Self, density: f64, temperature: f64, sigma: f64) void {
-        const hs_potential = HardSpherePotential.init(sigma);
-        self.initSystem(density, temperature, hs_potential.toPotential());
+        // Store the potential data in the solver to ensure lifetime
+        self.hs_potential_data = HardSpherePotential.init(sigma);
+        const potential = self.hs_potential_data.?.toPotential();
+        self.initSystem(density, temperature, potential);
 
-        // Use better initial guess for hard spheres
-        self.initPYHardSphereGuess(sigma);
+        // Use exact analytical solution as initial guess
+        exact.initPYHardSphereGuess(&self.g_r, &self.h_r, &self.c_r, density, sigma);
     }
 
     /// Initialize system with Lennard-Jones potential
     pub fn initLennardJones(self: *Self, density: f64, temperature: f64, epsilon: f64, sigma: f64) void {
-        const lj_potential = LennardJonesPotential.init(epsilon, sigma);
-        self.initSystem(density, temperature, lj_potential.toPotential());
+        // Store the potential data in the solver to ensure lifetime
+        self.lj_potential_data = LennardJonesPotential.init(epsilon, sigma);
+        const potential = self.lj_potential_data.?.toPotential();
+        self.initSystem(density, temperature, potential);
     }
 
     /// Improved initial guess using mean field theory approximation
@@ -141,40 +150,6 @@ pub const Solver = struct {
                 if (self.g_r.values[i] < 0.01) self.g_r.values[i] = 0.01;
             } else {
                 self.g_r.values[i] = 0.01;
-            }
-
-            self.h_r.values[i] = self.g_r.values[i] - 1.0;
-        }
-    }
-
-    /// Initialize with Percus-Yevick analytical solution for hard spheres (better guess)
-    pub fn initPYHardSphereGuess(self: *Self, sigma: f64) void {
-        const eta = std.math.pi * self.density * sigma * sigma * sigma / 6.0; // packing fraction
-
-        if (eta > 0.5) {
-            // Too dense, fall back to simple guess
-            self.initMeanFieldGuess();
-            return;
-        }
-
-        // PY hard sphere approximation
-        const alpha = (1.0 + 2.0 * eta) * (1.0 + 2.0 * eta) / ((1.0 - eta) * (1.0 - eta) * (1.0 - eta) * (1.0 - eta));
-        const beta_hs = -6.0 * eta * (1.0 + eta / 2.0) / ((1.0 - eta) * (1.0 - eta) * (1.0 - eta));
-
-        for (0..self.grid.n_points) |i| {
-            const r = self.g_r.getRadius(i);
-
-            if (r < sigma) {
-                self.g_r.values[i] = 0.0;
-            } else if (r < 2.0 * sigma) {
-                // Contact region with PY approximation
-                const x = r / sigma;
-                self.g_r.values[i] = alpha + beta_hs * (x - 1.0);
-                if (self.g_r.values[i] < 0.01) self.g_r.values[i] = 0.01;
-            } else {
-                // Long range: approach 1 exponentially
-                const decay = @exp(-(r - 2.0 * sigma) / sigma);
-                self.g_r.values[i] = 1.0 + 0.1 * decay;
             }
 
             self.h_r.values[i] = self.g_r.values[i] - 1.0;
