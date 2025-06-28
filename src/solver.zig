@@ -254,6 +254,9 @@ pub const Solver = struct {
                 self.g_r.values[i] = self.h_r.values[i] + 1.0;
             }
 
+            // Enforce hard sphere constraint after g(r) update
+            try self.enforceHardSphereConstraint();
+
             // Check convergence
             err = 0.0;
             for (0..self.grid.n_points) |i| {
@@ -280,39 +283,63 @@ pub const Solver = struct {
         }
     }
 
+    /// Enforce hard sphere constraint: g(r) = 0, h(r) = -1 for r < σ
+    fn enforceHardSphereConstraint(self: *Self) !void {
+        const potential = self.potential orelse return;
+
+        for (0..self.grid.n_points) |i| {
+            const r = self.g_r.getRadius(i);
+            const u_r = potential.evaluate(r);
+
+            if (std.math.isInf(u_r) and u_r > 0) {
+                // Hard sphere exclusion zone
+                self.g_r.values[i] = 0.0;
+                self.h_r.values[i] = -1.0;
+            }
+        }
+    }
+
     /// Apply closure relation to compute c(r) from h(r) and g(r)
     fn applyClosure(self: *Self, closure: ClosureType) !void {
         const potential = self.potential orelse return error.NoPotential;
 
-        switch (closure) {
-            .hypernetted_chain => {
-                // HNC: c(r) = h(r) - ln(g(r)) - βu(r)
-                for (0..self.grid.n_points) |i| {
-                    const r = self.c_r.getRadius(i);
-                    const u_r = potential.evaluate(r);
+        for (0..self.grid.n_points) |i| {
+            const r = self.c_r.getRadius(i);
+            const u_r = potential.evaluate(r);
 
+            // First: enforce hard sphere exclusion constraint
+            if (std.math.isInf(u_r) and u_r > 0) {
+                // Hard sphere exclusion: g(r) = 0, h(r) = -1
+                self.g_r.values[i] = 0.0;
+                self.h_r.values[i] = -1.0;
+                // For hard sphere core, c(r) depends on closure:
+                // PY: c(r) = -g(r) = 0 when g(r) = 0
+                // HNC: c(r) should be finite in core
+                switch (closure) {
+                    .percus_yevick => self.c_r.values[i] = 0.0,
+                    .hypernetted_chain => self.c_r.values[i] = -1.0,
+                }
+                continue;
+            }
+
+            // Apply normal closure relations for accessible region
+            switch (closure) {
+                .hypernetted_chain => {
+                    // HNC: c(r) = h(r) - ln(g(r)) - βu(r)
                     if (self.g_r.values[i] > 0.0 and std.math.isFinite(u_r)) {
                         const beta_u = self.beta * u_r;
-
                         // Clamp βu to prevent overflow
                         const clamped_beta_u = @max(@min(beta_u, 50.0), -50.0);
-
                         self.c_r.values[i] = self.h_r.values[i] - @log(self.g_r.values[i]) - clamped_beta_u;
                     } else {
-                        // Handle infinite potential or zero g(r)
-                        self.c_r.values[i] = -1e6; // Large negative instead of -inf
+                        // Fallback for problematic cases
+                        self.c_r.values[i] = -1.0;
                     }
-                }
-            },
-            .percus_yevick => {
-                // PY: c(r) = (1 - exp(βu(r))) * g(r)
-                for (0..self.grid.n_points) |i| {
-                    const r = self.c_r.getRadius(i);
-                    const u_r = potential.evaluate(r);
-
+                },
+                .percus_yevick => {
+                    // PY: c(r) = (1 - exp(βu(r))) * g(r)
                     if (std.math.isFinite(u_r)) {
                         const beta_u = self.beta * u_r;
-
                         // Clamp βu to prevent overflow
                         const clamped_beta_u = @max(@min(beta_u, 50.0), -50.0);
                         const exp_beta_u = @exp(clamped_beta_u);
@@ -320,38 +347,57 @@ pub const Solver = struct {
                         if (std.math.isFinite(exp_beta_u)) {
                             self.c_r.values[i] = (1.0 - exp_beta_u) * self.g_r.values[i];
                         } else {
-                            // For very large βu (hard core-like)
+                            // For very large βu, exp(βu) → ∞, so (1 - exp(βu)) → -∞
                             self.c_r.values[i] = -self.g_r.values[i];
                         }
                     } else {
-                        // Handle infinite potential
-                        self.c_r.values[i] = -self.g_r.values[i];
+                        // Should not reach here due to exclusion check above
+                        self.c_r.values[i] = 0.0;
                     }
-                }
-            },
+                },
+            }
         }
     }
 
     /// Solve OZ equation using simple convolution approximation (educational version)
     fn solveOZEquationSimple(self: *Self) !void {
-        // h(r) = c(r) + ρ ∫ c(|r-r'|) h(r') dr'
-        // Simplified discrete convolution for educational purposes
+        // h(r) = c(r) + ρ ∫ c(|r⃗-r⃗'|) h(r') d³r'
+        // In spherical coordinates: h(r) = c(r) + 4πρ ∫₀^∞ r'² h(r') [∫₋₁¹ c(s) d(cos θ)] dr'
+        // where s = √(r² + r'² - 2rr'cos θ)
 
         const old_h = try self.allocator.alloc(f64, self.grid.n_points);
         defer self.allocator.free(old_h);
         @memcpy(old_h, self.h_r.values);
 
         for (0..self.grid.n_points) |i| {
+            const r = self.h_r.getRadius(i);
             var convolution: f64 = 0.0;
 
-            // Simplified convolution integral
+            // Radial integration over r' with proper 3D geometry
             for (0..self.grid.n_points) |j| {
+                const rp = self.h_r.getRadius(j);
+                if (rp == 0.0) continue; // Skip r' = 0 point
 
-                // Simple approximation: |r_i - r_j| ≈ |i - j| * dr
-                const r_diff = @abs(@as(f64, @floatFromInt(i)) - @as(f64, @floatFromInt(j))) * self.grid.dr;
-                const r_diff_idx = @min(@as(usize, @intFromFloat(r_diff / self.grid.dr)), self.grid.n_points - 1);
+                // Angular integration: ∫₋₁¹ c(s) d(cos θ) where s = √(r² + r'² - 2rr'cos θ)
+                var angular_integral: f64 = 0.0;
+                const n_theta = 20; // Number of angular integration points
 
-                convolution += self.c_r.values[r_diff_idx] * old_h[j] * self.grid.dr;
+                for (0..n_theta) |k| {
+                    const cos_theta = -1.0 + 2.0 * @as(f64, @floatFromInt(k)) / @as(f64, @floatFromInt(n_theta - 1));
+
+                    // Distance s = |r⃗ - r⃗'|
+                    const s_squared = r * r + rp * rp - 2.0 * r * rp * cos_theta;
+                    const s = @sqrt(@max(s_squared, 0.0));
+
+                    // Find c(s) by interpolation
+                    const s_idx = @min(@as(usize, @intFromFloat(s / self.grid.dr)), self.grid.n_points - 1);
+                    const c_s = self.c_r.values[s_idx];
+
+                    angular_integral += c_s * (2.0 / @as(f64, @floatFromInt(n_theta)));
+                }
+
+                // Add radial contribution: 4πρ * r'² * h(r') * [angular integral] * dr'
+                convolution += 4.0 * std.math.pi * rp * rp * old_h[j] * angular_integral * self.grid.dr;
             }
 
             self.h_r.values[i] = self.c_r.values[i] + self.density * convolution;
