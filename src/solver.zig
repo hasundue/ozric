@@ -254,9 +254,6 @@ pub const Solver = struct {
                 self.g_r.values[i] = self.h_r.values[i] + 1.0;
             }
 
-            // Enforce hard sphere constraint after g(r) update
-            try self.enforceHardSphereConstraint();
-
             // Check convergence
             err = 0.0;
             for (0..self.grid.n_points) |i| {
@@ -283,22 +280,6 @@ pub const Solver = struct {
         }
     }
 
-    /// Enforce hard sphere constraint: g(r) = 0, h(r) = -1 for r < σ
-    fn enforceHardSphereConstraint(self: *Self) !void {
-        const potential = self.potential orelse return;
-
-        for (0..self.grid.n_points) |i| {
-            const r = self.g_r.getRadius(i);
-            const u_r = potential.evaluate(r);
-
-            if (std.math.isInf(u_r) and u_r > 0) {
-                // Hard sphere exclusion zone
-                self.g_r.values[i] = 0.0;
-                self.h_r.values[i] = -1.0;
-            }
-        }
-    }
-
     /// Apply closure relation to compute c(r) from h(r) and g(r)
     fn applyClosure(self: *Self, closure: ClosureType) !void {
         const potential = self.potential orelse return error.NoPotential;
@@ -307,52 +288,47 @@ pub const Solver = struct {
             const r = self.c_r.getRadius(i);
             const u_r = potential.evaluate(r);
 
-            // First: enforce hard sphere exclusion constraint
-            if (std.math.isInf(u_r) and u_r > 0) {
-                // Hard sphere exclusion: g(r) = 0, h(r) = -1
-                self.g_r.values[i] = 0.0;
-                self.h_r.values[i] = -1.0;
-                // For hard sphere core, c(r) should be:
-                // PY: c(r) = -1 in the core (proven analytical result)
-                // HNC: c(r) should be finite in core
-                switch (closure) {
-                    .percus_yevick => self.c_r.values[i] = -1.0,
-                    .hypernetted_chain => self.c_r.values[i] = -1.0,
-                }
-                continue;
-            }
-
-            // Apply normal closure relations for accessible region
             switch (closure) {
                 .hypernetted_chain => {
                     // HNC: c(r) = h(r) - ln(g(r)) - βu(r)
-                    if (self.g_r.values[i] > 0.0 and std.math.isFinite(u_r)) {
+                    if (self.g_r.values[i] > 0.0) {
                         const beta_u = self.beta * u_r;
-                        // Clamp βu to prevent overflow
-                        const clamped_beta_u = @max(@min(beta_u, 50.0), -50.0);
-                        self.c_r.values[i] = self.h_r.values[i] - @log(self.g_r.values[i]) - clamped_beta_u;
+                        // Handle infinite potentials properly in HNC
+                        if (std.math.isInf(beta_u)) {
+                            // For infinite potentials, HNC gives specific behavior
+                            if (beta_u > 0) {
+                                // Repulsive infinite potential: c(r) = h(r) - ln(g(r)) - ∞
+                                self.c_r.values[i] = self.h_r.values[i] - @log(self.g_r.values[i]) - 1e10;
+                            } else {
+                                // Attractive infinite potential (shouldn't happen)
+                                self.c_r.values[i] = self.h_r.values[i] - @log(self.g_r.values[i]) + 1e10;
+                            }
+                        } else {
+                            // Normal case with finite potential
+                            self.c_r.values[i] = self.h_r.values[i] - @log(self.g_r.values[i]) - beta_u;
+                        }
                     } else {
-                        // Fallback for problematic cases
-                        self.c_r.values[i] = -1.0;
+                        // g(r) ≤ 0: HNC becomes problematic, use limiting case
+                        self.c_r.values[i] = self.h_r.values[i];
                     }
                 },
                 .percus_yevick => {
                     // PY: c(r) = (1 - exp(βu(r))) * g(r)
-                    if (std.math.isFinite(u_r)) {
-                        const beta_u = self.beta * u_r;
-                        // Clamp βu to prevent overflow
-                        const clamped_beta_u = @max(@min(beta_u, 50.0), -50.0);
-                        const exp_beta_u = @exp(clamped_beta_u);
+                    const beta_u = self.beta * u_r;
 
-                        if (std.math.isFinite(exp_beta_u)) {
-                            self.c_r.values[i] = (1.0 - exp_beta_u) * self.g_r.values[i];
-                        } else {
-                            // For very large βu, exp(βu) → ∞, so (1 - exp(βu)) → -∞
+                    if (std.math.isInf(beta_u)) {
+                        // For infinite potentials
+                        if (beta_u > 0) {
+                            // Repulsive infinite potential: exp(βu) → ∞, so (1 - exp(βu)) → -∞
                             self.c_r.values[i] = -self.g_r.values[i];
+                        } else {
+                            // Attractive infinite potential: exp(βu) → 0, so (1 - exp(βu)) → 1
+                            self.c_r.values[i] = self.g_r.values[i];
                         }
                     } else {
-                        // Should not reach here due to exclusion check above
-                        self.c_r.values[i] = 0.0;
+                        // Normal case with finite potential
+                        const exp_beta_u = @exp(beta_u);
+                        self.c_r.values[i] = (1.0 - exp_beta_u) * self.g_r.values[i];
                     }
                 },
             }
