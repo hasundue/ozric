@@ -312,11 +312,11 @@ pub const Solver = struct {
                 // Hard sphere exclusion: g(r) = 0, h(r) = -1
                 self.g_r.values[i] = 0.0;
                 self.h_r.values[i] = -1.0;
-                // For hard sphere core, c(r) depends on closure:
-                // PY: c(r) = -g(r) = 0 when g(r) = 0
+                // For hard sphere core, c(r) should be:
+                // PY: c(r) = -1 in the core (proven analytical result)
                 // HNC: c(r) should be finite in core
                 switch (closure) {
-                    .percus_yevick => self.c_r.values[i] = 0.0,
+                    .percus_yevick => self.c_r.values[i] = -1.0,
                     .hypernetted_chain => self.c_r.values[i] = -1.0,
                 }
                 continue;
