@@ -1,0 +1,18 @@
+Ornstein-Zernike Solution Summary
+=================================
+
+System Parameters:
+  Density (ρ):     0.700000
+  Temperature (T): 1.000000
+  Beta (β):        1.000000
+
+Grid Parameters:
+  Points:          256
+  Maximum r:       8.000000
+  Grid spacing:    0.031373
+
+Radial Distribution Function g(r) Statistics:
+  Minimum:         0.502745
+  Maximum:         1.000086
+  Mean:            0.998065
+  Finite values:   256/256

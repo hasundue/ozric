@@ -73,6 +73,7 @@
         {
           default = pkgs.mkShell {
             buildInputs = with pkgs; [
+              deno
               treefmt
               zig
               blas

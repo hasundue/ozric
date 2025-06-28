@@ -5,6 +5,7 @@ pub const potentials = @import("potentials.zig");
 pub const grid = @import("grid.zig");
 pub const convergence = @import("convergence.zig");
 pub const solver = @import("solver.zig");
+pub const export_data = @import("export.zig");
 
 // Re-export commonly used types for convenience
 pub const Potential = potentials.Potential;
