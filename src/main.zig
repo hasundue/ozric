@@ -1,32 +1,55 @@
 const std = @import("std");
 const ozric = @import("ozric");
 
+/// Helper function to create file paths in the output directory
+fn buildOutputPath(allocator: std.mem.Allocator, output_dir: []const u8, filename: []const u8) ![]u8 {
+    return std.fmt.allocPrint(allocator, "{s}/{s}", .{ output_dir, filename });
+}
+
 pub fn main() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    std.log.info("🧪 Ozric - Ornstein-Zernike Equation Solver", .{});
-    std.log.info("", .{});
+    std.debug.print("🧪 Ozric - Ornstein-Zernike Equation Solver", .{});
+    std.debug.print("", .{});
 
-    // Parse command line arguments for different examples
+    // Parse command line arguments
     const args = try std.process.argsAlloc(allocator);
     defer std.process.argsFree(allocator, args);
 
-    const example = if (args.len > 1) args[1] else "hard-sphere";
+    // Parse arguments: ozric [example] [--output-dir <dir>]
+    var example: []const u8 = "hard-sphere";
+    var output_dir: []const u8 = "out";
 
-    if (std.mem.eql(u8, example, "help") or std.mem.eql(u8, example, "--help")) {
-        printUsage();
-        return;
+    var i: usize = 1;
+    while (i < args.len) {
+        const arg = args[i];
+
+        if (std.mem.eql(u8, arg, "help") or std.mem.eql(u8, arg, "--help")) {
+            printUsage();
+            return;
+        } else if (std.mem.eql(u8, arg, "--output-dir") or std.mem.eql(u8, arg, "-o")) {
+            if (i + 1 >= args.len) {
+                std.log.err("Error: {s} requires a directory argument", .{arg});
+                return;
+            }
+            i += 1;
+            output_dir = args[i];
+        } else {
+            // First non-flag argument is the example
+            example = arg;
+        }
+        i += 1;
     }
 
     // Run the selected example
     if (std.mem.eql(u8, example, "hard-sphere")) {
-        try runHardSphereExample(allocator);
+        try runHardSphereExample(allocator, output_dir);
     } else if (std.mem.eql(u8, example, "lennard-jones")) {
-        try runLennardJonesExample(allocator);
+        try runLennardJonesExample(allocator, output_dir);
     } else if (std.mem.eql(u8, example, "comparison")) {
-        try runMethodComparison(allocator);
+        try runMethodComparison(allocator, output_dir);
     } else {
         std.log.err("Unknown example: '{s}'. Use 'help' to see available examples.", .{example});
         return;
@@ -34,18 +57,24 @@ pub fn main() !void {
 }
 
 fn printUsage() void {
-    std.log.info("Usage: ozric [example]", .{});
-    std.log.info("", .{});
-    std.log.info("Available examples:", .{});
-    std.log.info("  hard-sphere    - Hard sphere potential with PY closure (default)", .{});
-    std.log.info("  lennard-jones  - Lennard-Jones potential with PY closure", .{});
-    std.log.info("  comparison     - Compare different solver methods", .{});
-    std.log.info("  help           - Show this help message", .{});
-    std.log.info("", .{});
-    std.log.info("Output files will be saved to the 'out/' directory.", .{});
+    std.debug.print("Usage: ozric [example] [options]\n", .{});
+    std.debug.print("\n", .{});
+    std.debug.print("Available examples:\n", .{});
+    std.debug.print("  hard-sphere    - Hard sphere potential with PY closure (default)\n", .{});
+    std.debug.print("  lennard-jones  - Lennard-Jones potential with PY closure\n", .{});
+    std.debug.print("  comparison     - Compare different solver methods\n", .{});
+    std.debug.print("  help           - Show this help message\n", .{});
+    std.debug.print("\n", .{});
+    std.debug.print("Options:\n", .{});
+    std.debug.print("  -o, --output-dir <dir>  Output directory (default: 'out')\n", .{});
+    std.debug.print("\n", .{});
+    std.debug.print("Examples:\n", .{});
+    std.debug.print("  ozric hard-sphere\n", .{});
+    std.debug.print("  ozric lennard-jones --output-dir results\n", .{});
+    std.debug.print("  ozric comparison -o /tmp/data\n", .{});
 }
 
-fn runHardSphereExample(allocator: std.mem.Allocator) !void {
+fn runHardSphereExample(allocator: std.mem.Allocator, output_dir: []const u8) !void {
     std.log.info("🔴 Hard Sphere System Example", .{});
     std.log.info("", .{});
 
@@ -88,26 +117,32 @@ fn runHardSphereExample(allocator: std.mem.Allocator) !void {
     std.log.info("💾 Exporting data...", .{});
 
     // Ensure output directory exists
-    std.fs.cwd().makeDir("out") catch |err| switch (err) {
+    std.fs.cwd().makeDir(output_dir) catch |err| switch (err) {
         error.PathAlreadyExists => {},
         else => return err,
     };
 
     const csv_config = ozric.export_data.ExportConfig{ .format = .csv, .precision = 6 };
-    try ozric.export_data.exportRadialData(allocator, &solver, "out/hard_sphere_rdf.csv", csv_config);
+    const csv_path = try buildOutputPath(allocator, output_dir, "hard_sphere_rdf.csv");
+    defer allocator.free(csv_path);
+    try ozric.export_data.exportRadialData(allocator, &solver, csv_path, csv_config);
 
     const json_config = ozric.export_data.ExportConfig{ .format = .json, .precision = 6 };
-    try ozric.export_data.exportRadialData(allocator, &solver, "out/hard_sphere_rdf.json", json_config);
+    const json_path = try buildOutputPath(allocator, output_dir, "hard_sphere_rdf.json");
+    defer allocator.free(json_path);
+    try ozric.export_data.exportRadialData(allocator, &solver, json_path, json_config);
 
-    try ozric.export_data.exportSummaryStats(&solver, "out/hard_sphere_summary.txt");
+    const summary_path = try buildOutputPath(allocator, output_dir, "hard_sphere_summary.txt");
+    defer allocator.free(summary_path);
+    try ozric.export_data.exportSummaryStats(&solver, summary_path);
 
     std.log.info("✅ Files saved:", .{});
-    std.log.info("  - out/hard_sphere_rdf.csv     (CSV data)", .{});
-    std.log.info("  - out/hard_sphere_rdf.json    (JSON data)", .{});
-    std.log.info("  - out/hard_sphere_summary.txt (Statistics)", .{});
+    std.log.info("  - {s}/hard_sphere_rdf.csv     (CSV data)", .{output_dir});
+    std.log.info("  - {s}/hard_sphere_rdf.json    (JSON data)", .{output_dir});
+    std.log.info("  - {s}/hard_sphere_summary.txt (Statistics)", .{output_dir});
 }
 
-fn runLennardJonesExample(allocator: std.mem.Allocator) !void {
+fn runLennardJonesExample(allocator: std.mem.Allocator, output_dir: []const u8) !void {
     std.log.info("⚛️  Lennard-Jones System Example", .{});
     std.log.info("", .{});
 
@@ -153,26 +188,32 @@ fn runLennardJonesExample(allocator: std.mem.Allocator) !void {
     std.log.info("💾 Exporting data...", .{});
 
     // Ensure output directory exists
-    std.fs.cwd().makeDir("out") catch |err| switch (err) {
+    std.fs.cwd().makeDir(output_dir) catch |err| switch (err) {
         error.PathAlreadyExists => {},
         else => return err,
     };
 
     const csv_config = ozric.export_data.ExportConfig{ .format = .csv, .precision = 6 };
-    try ozric.export_data.exportRadialData(allocator, &solver, "out/lennard_jones_rdf.csv", csv_config);
+    const csv_path = try buildOutputPath(allocator, output_dir, "lennard_jones_rdf.csv");
+    defer allocator.free(csv_path);
+    try ozric.export_data.exportRadialData(allocator, &solver, csv_path, csv_config);
 
     const json_config = ozric.export_data.ExportConfig{ .format = .json, .precision = 6 };
-    try ozric.export_data.exportRadialData(allocator, &solver, "out/lennard_jones_rdf.json", json_config);
+    const json_path = try buildOutputPath(allocator, output_dir, "lennard_jones_rdf.json");
+    defer allocator.free(json_path);
+    try ozric.export_data.exportRadialData(allocator, &solver, json_path, json_config);
 
-    try ozric.export_data.exportSummaryStats(&solver, "out/lennard_jones_summary.txt");
+    const summary_path = try buildOutputPath(allocator, output_dir, "lennard_jones_summary.txt");
+    defer allocator.free(summary_path);
+    try ozric.export_data.exportSummaryStats(&solver, summary_path);
 
     std.log.info("✅ Files saved:", .{});
-    std.log.info("  - out/lennard_jones_rdf.csv     (CSV data)", .{});
-    std.log.info("  - out/lennard_jones_rdf.json    (JSON data)", .{});
-    std.log.info("  - out/lennard_jones_summary.txt (Statistics)", .{});
+    std.log.info("  - {s}/lennard_jones_rdf.csv     (CSV data)", .{output_dir});
+    std.log.info("  - {s}/lennard_jones_rdf.json    (JSON data)", .{output_dir});
+    std.log.info("  - {s}/lennard_jones_summary.txt (Statistics)", .{output_dir});
 }
 
-fn runMethodComparison(allocator: std.mem.Allocator) !void {
+fn runMethodComparison(allocator: std.mem.Allocator, output_dir: []const u8) !void {
     std.log.info("⚖️  Solver Method Comparison", .{});
     std.log.info("", .{});
 
@@ -221,16 +262,22 @@ fn runMethodComparison(allocator: std.mem.Allocator) !void {
     ozric.export_data.displayRadialFunctions(&solver_fft, 8);
 
     // Export comparison data
-    std.fs.cwd().makeDir("out") catch |err| switch (err) {
+    std.fs.cwd().makeDir(output_dir) catch |err| switch (err) {
         error.PathAlreadyExists => {},
         else => return err,
     };
 
     const csv_config = ozric.export_data.ExportConfig{ .format = .csv, .precision = 6 };
-    try ozric.export_data.exportRadialData(allocator, &solver_simple, "out/comparison_simple.csv", csv_config);
-    try ozric.export_data.exportRadialData(allocator, &solver_fft, "out/comparison_fft.csv", csv_config);
+
+    const simple_path = try buildOutputPath(allocator, output_dir, "comparison_simple.csv");
+    defer allocator.free(simple_path);
+    try ozric.export_data.exportRadialData(allocator, &solver_simple, simple_path, csv_config);
+
+    const fft_path = try buildOutputPath(allocator, output_dir, "comparison_fft.csv");
+    defer allocator.free(fft_path);
+    try ozric.export_data.exportRadialData(allocator, &solver_fft, fft_path, csv_config);
 
     std.log.info("✅ Comparison files saved:", .{});
-    std.log.info("  - out/comparison_simple.csv (Simple convolution)", .{});
-    std.log.info("  - out/comparison_fft.csv    (FFT-based)", .{});
+    std.log.info("  - {s}/comparison_simple.csv (Simple convolution)", .{output_dir});
+    std.log.info("  - {s}/comparison_fft.csv    (FFT-based)", .{output_dir});
 }
