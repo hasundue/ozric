@@ -47,6 +47,8 @@ pub const Solver = struct {
     temperature: f64,
     beta: f64, // β = 1/(kB*T), inverse thermal energy
     potential: ?Potential, // Interaction potential u(r)
+    hs_potential_data: ?HardSpherePotential, // Storage for hard sphere potential data
+    lj_potential_data: ?LennardJonesPotential, // Storage for LJ potential data
 
     // Convergence acceleration
     accelerator: ConvergenceAccelerator,
@@ -73,6 +75,8 @@ pub const Solver = struct {
             .temperature = 0.0,
             .beta = 0.0,
             .potential = null,
+            .hs_potential_data = null,
+            .lj_potential_data = null,
             .accelerator = ConvergenceAccelerator.init(allocator, ConvergenceParams{}),
         };
     }
@@ -108,8 +112,10 @@ pub const Solver = struct {
 
     /// Initialize system with hard sphere potential
     pub fn initHardSphere(self: *Self, density: f64, temperature: f64, sigma: f64) void {
-        const hs_potential = HardSpherePotential.init(sigma);
-        self.initSystem(density, temperature, hs_potential.toPotential());
+        // Store the potential data in the solver to ensure lifetime
+        self.hs_potential_data = HardSpherePotential.init(sigma);
+        const potential = self.hs_potential_data.?.toPotential();
+        self.initSystem(density, temperature, potential);
 
         // Use better initial guess for hard spheres
         self.initPYHardSphereGuess(sigma);
@@ -117,8 +123,10 @@ pub const Solver = struct {
 
     /// Initialize system with Lennard-Jones potential
     pub fn initLennardJones(self: *Self, density: f64, temperature: f64, epsilon: f64, sigma: f64) void {
-        const lj_potential = LennardJonesPotential.init(epsilon, sigma);
-        self.initSystem(density, temperature, lj_potential.toPotential());
+        // Store the potential data in the solver to ensure lifetime
+        self.lj_potential_data = LennardJonesPotential.init(epsilon, sigma);
+        const potential = self.lj_potential_data.?.toPotential();
+        self.initSystem(density, temperature, potential);
     }
 
     /// Improved initial guess using mean field theory approximation
@@ -191,23 +199,35 @@ pub const Solver = struct {
         self.initializeGamma();
     }
 
-    /// Initialize γ(r) = h(r) - c(r) after setting up initial guess
+    /// Initialize γ(r) = h(r) - c(r) using analytical hard sphere solution
     fn initializeGamma(self: *Self) void {
-        // First compute c(r) using standard closure relation
-        if (self.potential) |potential| {
-            for (0..self.grid.n_points) |i| {
-                const r = self.c_r.getRadius(i);
-                const u_r = potential.evaluate(r);
-                const beta_u = self.beta * u_r;
+        // Use analytical hard sphere solution as initial guess
+        const potential = self.potential orelse return;
 
-                // Use PY closure for initialization: c(r) = (1 - exp(βu)) * g(r)
-                self.c_r.values[i] = closures.applyPY(self.g_r.values[i], beta_u);
-            }
-        }
-
-        // Now initialize γ(r) = h(r) - c(r)
         for (0..self.grid.n_points) |i| {
-            self.gamma_r.values[i] = self.h_r.values[i] - self.c_r.values[i];
+            const r = self.h_r.getRadius(i);
+            const u_r = potential.evaluate(r);
+
+            // Debug: print first few potential evaluations
+            if (i < 5) {
+                std.log.info("  init: r={d:.3}, u(r)={d:.3}, isInf={}", .{ r, u_r, std.math.isInf(u_r) });
+            }
+
+            if (std.math.isInf(u_r) and u_r > 0) {
+                // Hard core region: r < σ
+                // Analytical solution: g(r) = 0, h(r) = -1, c(r) = -1
+                self.g_r.values[i] = 0.0;
+                self.h_r.values[i] = -1.0;
+                self.c_r.values[i] = -1.0;
+                self.gamma_r.values[i] = self.h_r.values[i] - self.c_r.values[i]; // = -1 - (-1) = 0
+            } else {
+                // Outside hard core: r ≥ σ
+                // Analytical solution: g(r) = 1, h(r) = 0, c(r) = 0
+                self.g_r.values[i] = 1.0;
+                self.h_r.values[i] = 0.0;
+                self.c_r.values[i] = 0.0;
+                self.gamma_r.values[i] = self.h_r.values[i] - self.c_r.values[i]; // = 0 - 0 = 0
+            }
         }
     }
 
@@ -265,6 +285,15 @@ pub const Solver = struct {
             defer self.allocator.free(old_gamma);
             @memcpy(old_gamma, self.gamma_r.values);
 
+            // Debug: check potential before closure
+            if (iteration < 3) {
+                if (self.potential) |pot| {
+                    const test_r = 0.031;
+                    const test_u = pot.evaluate(test_r);
+                    std.log.info("  pre-closure iter {}: pot.evaluate({d:.3}) = {d:.3}", .{ iteration, test_r, test_u });
+                }
+            }
+
             // Apply γ-based closure relation to get c(r) from γ(r)
             try self.applyClosureGamma(closure);
 
@@ -297,8 +326,20 @@ pub const Solver = struct {
             prev_err = err;
             iteration += 1;
 
-            if (iteration % 10 == 0) {
+            if (iteration % 10 == 0 or iteration < 3) {
                 std.log.info("Iteration {}: error = {d:.6}", .{ iteration, err });
+                if (iteration < 3) {
+                    std.log.info("  r=0.000: γ = {d:.6}, c = {d:.6}, h = {d:.6}, g = {d:.6}", .{ self.gamma_r.values[0], self.c_r.values[0], self.h_r.values[0], self.g_r.values[0] });
+
+                    const r1 = self.h_r.getRadius(1);
+                    const u_r1 = if (self.potential) |pot| pot.evaluate(r1) else 0.0;
+                    std.log.info("  r={d:.3}: u = {d:.3}, γ = {d:.6}, c = {d:.6}, h = {d:.6}, g = {d:.6}", .{ r1, u_r1, self.gamma_r.values[1], self.c_r.values[1], self.h_r.values[1], self.g_r.values[1] });
+
+                    const mid_idx = self.grid.n_points / 2;
+                    const r_mid = self.h_r.getRadius(mid_idx);
+                    const u_mid = if (self.potential) |pot| pot.evaluate(r_mid) else 0.0;
+                    std.log.info("  r={d:.3}: u = {d:.3}, γ = {d:.6}, c = {d:.6}, h = {d:.6}, g = {d:.6}", .{ r_mid, u_mid, self.gamma_r.values[mid_idx], self.c_r.values[mid_idx], self.h_r.values[mid_idx], self.g_r.values[mid_idx] });
+                }
             }
         }
 
@@ -338,6 +379,11 @@ pub const Solver = struct {
             const r = self.c_r.getRadius(i);
             const u_r = potential.evaluate(r);
             const beta_u = self.beta * u_r;
+
+            // Debug: check potential for first few points
+            if (i < 3) {
+                std.log.info("  closure: r={d:.3}, u(r)={d:.3}, isInf={}", .{ r, u_r, std.math.isInf(u_r) });
+            }
 
             // Use the γ-based closure functions
             self.c_r.values[i] = closures.applyClosureGamma(closure, self.gamma_r.values[i], beta_u);
