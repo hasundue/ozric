@@ -35,6 +35,7 @@ pub const Solver = struct {
     h_r: RadialFunction, // h(r) = g(r) - 1, total correlation function
     c_r: RadialFunction, // c(r), direct correlation function
     g_r: RadialFunction, // g(r), radial distribution function
+    gamma_r: RadialFunction, // γ(r) = h(r) - c(r), indirect correlation function
 
     // FFT workspace for efficient convolution
     fft_workspace: ?[]f64,
@@ -56,6 +57,7 @@ pub const Solver = struct {
         const h_r = try RadialFunction.init(allocator, grid_params);
         const c_r = try RadialFunction.init(allocator, grid_params);
         const g_r = try RadialFunction.init(allocator, grid_params);
+        const gamma_r = try RadialFunction.init(allocator, grid_params);
 
         return Self{
             .allocator = allocator,
@@ -63,6 +65,7 @@ pub const Solver = struct {
             .h_r = h_r,
             .c_r = c_r,
             .g_r = g_r,
+            .gamma_r = gamma_r,
             .fft_workspace = null,
             .fft_plan_forward = null,
             .fft_plan_backward = null,
@@ -78,6 +81,7 @@ pub const Solver = struct {
         self.h_r.deinit();
         self.c_r.deinit();
         self.g_r.deinit();
+        self.gamma_r.deinit();
         self.accelerator.deinit();
 
         if (self.fft_workspace) |workspace| {
@@ -145,6 +149,9 @@ pub const Solver = struct {
 
             self.h_r.values[i] = self.g_r.values[i] - 1.0;
         }
+
+        // Initialize γ(r) = h(r) - c(r) using proper closure relation
+        self.initializeGamma();
     }
 
     /// Initialize with Percus-Yevick analytical solution for hard spheres (better guess)
@@ -178,6 +185,29 @@ pub const Solver = struct {
             }
 
             self.h_r.values[i] = self.g_r.values[i] - 1.0;
+        }
+
+        // Initialize γ(r) = h(r) - c(r) using proper closure relation
+        self.initializeGamma();
+    }
+
+    /// Initialize γ(r) = h(r) - c(r) after setting up initial guess
+    fn initializeGamma(self: *Self) void {
+        // First compute c(r) using standard closure relation
+        if (self.potential) |potential| {
+            for (0..self.grid.n_points) |i| {
+                const r = self.c_r.getRadius(i);
+                const u_r = potential.evaluate(r);
+                const beta_u = self.beta * u_r;
+
+                // Use PY closure for initialization: c(r) = (1 - exp(βu)) * g(r)
+                self.c_r.values[i] = closures.applyPY(self.g_r.values[i], beta_u);
+            }
+        }
+
+        // Now initialize γ(r) = h(r) - c(r)
+        for (0..self.grid.n_points) |i| {
+            self.gamma_r.values[i] = self.h_r.values[i] - self.c_r.values[i];
         }
     }
 
@@ -215,9 +245,9 @@ pub const Solver = struct {
         );
     }
 
-    /// Main solve method
+    /// Main solve method using γ(r) iteration (pyoz style)
     pub fn solve(self: *Self, closure: ClosureType, method: SolverMethod, max_iterations: usize, tolerance: f64) !void {
-        std.log.info("Starting OZ equation solution with {} closure using {} method...", .{ closure, method });
+        std.log.info("Starting OZ equation solution with {} closure using {} method (γ-iteration pyoz style)...", .{ closure, method });
 
         // Initialize acceleration methods
         if (method == .fft_based) {
@@ -230,32 +260,33 @@ pub const Solver = struct {
         var prev_err: f64 = std.math.inf(f64);
 
         while (iteration < max_iterations and err > tolerance) {
-            // Store old h(r) for convergence check
-            const old_h = try self.allocator.alloc(f64, self.grid.n_points);
-            defer self.allocator.free(old_h);
-            @memcpy(old_h, self.h_r.values);
+            // Store old γ(r) for convergence check
+            const old_gamma = try self.allocator.alloc(f64, self.grid.n_points);
+            defer self.allocator.free(old_gamma);
+            @memcpy(old_gamma, self.gamma_r.values);
 
-            // Apply closure relation to get c(r)
-            try self.applyClosure(closure);
+            // Apply γ-based closure relation to get c(r) from γ(r)
+            try self.applyClosureGamma(closure);
 
-            // Solve OZ equation to get new h(r)
-            switch (method) {
-                .simple_convolution => try self.solveOZEquationSimple(),
-                .fft_based => try self.solveOZEquationFFT(),
-            }
-
-            // Apply convergence acceleration
-            try self.accelerator.apply(self.h_r.values, old_h, iteration);
-
-            // Update g(r) = h(r) + 1
+            // Update h(r) = γ(r) + c(r) and g(r) = h(r) + 1
             for (0..self.grid.n_points) |i| {
+                self.h_r.values[i] = self.gamma_r.values[i] + self.c_r.values[i];
                 self.g_r.values[i] = self.h_r.values[i] + 1.0;
             }
 
-            // Check convergence
+            // Solve OZ equation: γ(r) = ρ ∫ c(|r⃗-r⃗'|) h(r') d³r'
+            switch (method) {
+                .simple_convolution => try self.solveGammaEquationSimple(),
+                .fft_based => try self.solveGammaEquationFFT(),
+            }
+
+            // Apply convergence acceleration to γ(r)
+            try self.accelerator.apply(self.gamma_r.values, old_gamma, iteration);
+
+            // Check convergence based on γ(r) changes
             err = 0.0;
             for (0..self.grid.n_points) |i| {
-                const diff = self.h_r.values[i] - old_h[i];
+                const diff = self.gamma_r.values[i] - old_gamma[i];
                 err += diff * diff;
             }
             err = @sqrt(err / @as(f64, @floatFromInt(self.grid.n_points)));
@@ -269,6 +300,13 @@ pub const Solver = struct {
             if (iteration % 10 == 0) {
                 std.log.info("Iteration {}: error = {d:.6}", .{ iteration, err });
             }
+        }
+
+        // Final update of h(r) and g(r) from converged γ(r) and c(r)
+        try self.applyClosureGamma(closure);
+        for (0..self.grid.n_points) |i| {
+            self.h_r.values[i] = self.gamma_r.values[i] + self.c_r.values[i];
+            self.g_r.values[i] = self.h_r.values[i] + 1.0;
         }
 
         if (err <= tolerance) {
@@ -289,6 +327,20 @@ pub const Solver = struct {
 
             // Use the dedicated closure functions
             self.c_r.values[i] = closures.applyClosure(closure, self.g_r.values[i], self.h_r.values[i], beta_u);
+        }
+    }
+
+    /// Apply γ-based closure relation to compute c(r) from γ(r) (pyoz style)
+    fn applyClosureGamma(self: *Self, closure: ClosureType) !void {
+        const potential = self.potential orelse return error.NoPotential;
+
+        for (0..self.grid.n_points) |i| {
+            const r = self.c_r.getRadius(i);
+            const u_r = potential.evaluate(r);
+            const beta_u = self.beta * u_r;
+
+            // Use the γ-based closure functions
+            self.c_r.values[i] = closures.applyClosureGamma(closure, self.gamma_r.values[i], beta_u);
         }
     }
 
@@ -382,6 +434,87 @@ pub const Solver = struct {
         const norm = 1.0 / @as(f64, @floatFromInt(n));
         for (0..n) |i| {
             self.h_r.values[i] = workspace[i] * norm;
+        }
+    }
+
+    /// Solve γ-equation using simple convolution: γ(r) = ρ ∫ c(|r⃗-r⃗'|) h(r') d³r'
+    fn solveGammaEquationSimple(self: *Self) !void {
+        // γ(r) = ρ ∫ c(|r⃗-r⃗'|) h(r') d³r'
+        // In spherical coordinates: γ(r) = 4πρ ∫₀^∞ r'² h(r') [∫₋₁¹ c(s) d(cos θ)] dr'
+        // where s = √(r² + r'² - 2rr'cos θ)
+
+        for (0..self.grid.n_points) |i| {
+            const r = self.gamma_r.getRadius(i);
+            var convolution: f64 = 0.0;
+
+            // Radial integration over r' with proper 3D geometry
+            for (0..self.grid.n_points) |j| {
+                const rp = self.h_r.getRadius(j);
+                if (rp == 0.0) continue; // Skip r' = 0 point
+
+                // Angular integration: ∫₋₁¹ c(s) d(cos θ) where s = √(r² + r'² - 2rr'cos θ)
+                var angular_integral: f64 = 0.0;
+                const n_theta = 20; // Number of angular integration points
+
+                for (0..n_theta) |k| {
+                    const cos_theta = -1.0 + 2.0 * @as(f64, @floatFromInt(k)) / @as(f64, @floatFromInt(n_theta - 1));
+
+                    // Distance s = |r⃗ - r⃗'|
+                    const s_squared = r * r + rp * rp - 2.0 * r * rp * cos_theta;
+                    const s = @sqrt(@max(s_squared, 0.0));
+
+                    // Find c(s) by interpolation
+                    const s_idx = @min(@as(usize, @intFromFloat(s / self.grid.dr)), self.grid.n_points - 1);
+                    const c_s = self.c_r.values[s_idx];
+
+                    angular_integral += c_s * (2.0 / @as(f64, @floatFromInt(n_theta)));
+                }
+
+                // Add radial contribution: 4πρ * r'² * h(r') * [angular integral] * dr'
+                convolution += 4.0 * std.math.pi * rp * rp * self.h_r.values[j] * angular_integral * self.grid.dr;
+            }
+
+            self.gamma_r.values[i] = self.density * convolution;
+        }
+    }
+
+    /// Solve γ-equation using FFT-based convolution: γ(r) = ρ ∫ c(|r⃗-r⃗'|) h(r') d³r'
+    fn solveGammaEquationFFT(self: *Self) !void {
+        const workspace = self.fft_workspace orelse return error.NoFFTWorkspace;
+        const plan_forward = self.fft_plan_forward orelse return error.NoFFTPlan;
+        const plan_backward = self.fft_plan_backward orelse return error.NoFFTPlan;
+
+        const n = self.grid.n_points;
+
+        // Copy c(r) to workspace
+        @memcpy(workspace[0..n], self.c_r.values);
+        @memset(workspace[n..], 0.0);
+
+        // Transform c(r) to k-space
+        c.fftw_execute(plan_forward);
+
+        // Store c(k) temporarily
+        const c_k = try self.allocator.alloc(f64, n);
+        defer self.allocator.free(c_k);
+        @memcpy(c_k, workspace[0..n]);
+
+        // Copy h(r) to workspace and transform
+        @memcpy(workspace[0..n], self.h_r.values);
+        @memset(workspace[n..], 0.0);
+        c.fftw_execute(plan_forward);
+
+        // Multiply in k-space: γ(k) = ρ * c(k) * h(k)
+        for (0..n) |i| {
+            workspace[i] = self.density * c_k[i] * workspace[i];
+        }
+
+        // Transform back to real space
+        c.fftw_execute(plan_backward);
+
+        // Normalize and copy back to γ(r)
+        const norm = 1.0 / @as(f64, @floatFromInt(n));
+        for (0..n) |i| {
+            self.gamma_r.values[i] = workspace[i] * norm;
         }
     }
 };
