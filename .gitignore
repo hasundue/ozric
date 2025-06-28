@@ -1,4 +1,11 @@
-result
-result-*
+# Development environment files
 .direnv/
 .pre-commit-config.yaml
+
+# Zig build artifacts
+zig-cache/
+zig-out/
+.zig-cache/
+
+# Computation outputs
+out

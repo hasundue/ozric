@@ -45,8 +45,38 @@ The project is in initial setup phase with no Zig source code yet. The foundatio
 - **Dependencies**: C mathematics libraries (BLAS, LAPACK, FFTW)
 - **Domain**: Ornstein-Zernike equation solving for statistical mechanics
 
+## Build Commands
+
+```bash
+# Build the project
+zig build
+
+# Run the executable
+zig build run
+
+# Run tests
+zig build test
+
+# Build in release mode
+zig build -Doptimize=ReleaseFast
+
+# Clean build artifacts
+rm -rf zig-cache zig-out
+```
+
+## Project Structure
+
+```
+src/
+├── main.zig          # Executable entry point
+├── root.zig          # Library root with core functionality
+tests/
+├── integration_test.zig  # Integration tests
+build.zig             # Build configuration
+```
+
 ## Important Notes
 
-- No build system (build.zig) exists yet - will need to be created when implementing Zig code
-- The `flake.nix` placeholder package (`pkgs.hello`) should be replaced with actual Zig package
+- Project uses C mathematics libraries: BLAS, LAPACK, FFTW3
+- Tests include both unit tests (in src files) and integration tests (tests/ directory)
 - Development environment loads from `../nvim#zig`, suggesting a shared Neovim+Zig setup

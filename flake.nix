@@ -73,7 +73,11 @@
           default = pkgs.mkShell {
             buildInputs = with pkgs; [
               treefmt
-              # Add your development dependencies here
+              zig
+              blas
+              lapack
+              fftw
+              pkg-config
             ];
             packages = with pkgs; [
               nil
