@@ -81,4 +81,29 @@ pub fn build(b: *std.Build) void {
     const test_step = b.step("test", "Run unit tests");
     test_step.dependOn(&run_lib_unit_tests.step);
     test_step.dependOn(&run_exe_unit_tests.step);
+
+    // WebAssembly target
+    const wasm_target = b.resolveTargetQuery(.{
+        .cpu_arch = .wasm32,
+        .os_tag = .freestanding,
+    });
+
+    const wasm_lib = b.addStaticLibrary(.{
+        .name = "ozric",
+        .root_source_file = b.path("src/wasm.zig"),
+        .target = wasm_target,
+        .optimize = optimize,
+    });
+
+    // Also create a WebAssembly module (executable)
+    const wasm_exe = b.addExecutable(.{
+        .name = "ozric",
+        .root_source_file = b.path("src/wasm.zig"),
+        .target = wasm_target,
+        .optimize = optimize,
+    });
+
+    const wasm_step = b.step("wasm", "Build WebAssembly library and module");
+    wasm_step.dependOn(&b.addInstallArtifact(wasm_lib, .{}).step);
+    wasm_step.dependOn(&b.addInstallArtifact(wasm_exe, .{}).step);
 }
