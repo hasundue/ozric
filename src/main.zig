@@ -316,7 +316,7 @@ fn runExactSolutionsExample(allocator: std.mem.Allocator, output_dir: []const u8
     std.debug.print("\n", .{});
 
     // 1D Hard sphere exact solution
-    ozric.exact.ExactSolutions.hardSphere1D(&g_r_exact, &h_r_exact, &c_r_exact, density, sigma);
+    try ozric.exact.ExactSolutions.hardSphere1D(&g_r_exact, &h_r_exact, &c_r_exact, density, sigma);
 
     const eta_1d = ozric.exact.packingFraction1D(density, sigma);
     const eta_3d = ozric.exact.packingFraction3D(density, sigma);
@@ -343,7 +343,7 @@ fn runExactSolutionsExample(allocator: std.mem.Allocator, output_dir: []const u8
     std.debug.print("\n", .{});
 
     // 3D Hard sphere exact solution for comparison
-    ozric.exact.ExactSolutions.hardSphere3D(&g_r_exact, &h_r_exact, &c_r_exact, density, sigma);
+    try ozric.exact.ExactSolutions.hardSphere3D(&g_r_exact, &h_r_exact, &c_r_exact, density, sigma);
 
     std.debug.print("📊 3D Hard Sphere Exact Solution (Percus-Yevick Analytical):\n", .{});
     std.debug.print("Packing fraction η₃ᴅ = πρσ³/6 = {d:.3}\n", .{eta_3d});
@@ -375,7 +375,7 @@ fn runExactSolutionsExample(allocator: std.mem.Allocator, output_dir: []const u8
 
     // Test Lennard-Jones perturbation solution (based on 1D HS reference)
     std.debug.print("📊 1D Lennard-Jones Perturbation Solution (ε=1.0, σ={d:.1}):\n", .{sigma});
-    ozric.exact.ExactSolutions.lennardJonesPerturbation(&g_r_exact, &h_r_exact, &c_r_exact, density, temperature, 1.0, sigma);
+    try ozric.exact.ExactSolutions.lennardJonesPerturbation(&g_r_exact, &h_r_exact, &c_r_exact, density, temperature, 1.0, sigma);
 
     std.debug.print("First few LJ perturbation values:\n", .{});
     for (0..5) |i| {
@@ -401,7 +401,7 @@ fn runExactSolutionsExample(allocator: std.mem.Allocator, output_dir: []const u8
     const csv_config = ozric.export_data.ExportConfig{ .format = .csv, .precision = 6 };
 
     // Export 1D hard sphere solution
-    ozric.exact.ExactSolutions.hardSphere1D(&g_r_exact, &h_r_exact, &c_r_exact, density, sigma);
+    try ozric.exact.ExactSolutions.hardSphere1D(&g_r_exact, &h_r_exact, &c_r_exact, density, sigma);
     @memcpy(exact_solver.g_r.values, g_r_exact.values);
     @memcpy(exact_solver.h_r.values, h_r_exact.values);
     @memcpy(exact_solver.c_r.values, c_r_exact.values);
@@ -414,7 +414,7 @@ fn runExactSolutionsExample(allocator: std.mem.Allocator, output_dir: []const u8
     try ozric.export_data.exportRadialData(allocator, &exact_solver, hs1d_csv_path, csv_config);
 
     // Export 3D hard sphere solution
-    ozric.exact.ExactSolutions.hardSphere3D(&g_r_exact, &h_r_exact, &c_r_exact, density, sigma);
+    try ozric.exact.ExactSolutions.hardSphere3D(&g_r_exact, &h_r_exact, &c_r_exact, density, sigma);
     @memcpy(exact_solver.g_r.values, g_r_exact.values);
     @memcpy(exact_solver.h_r.values, h_r_exact.values);
     @memcpy(exact_solver.c_r.values, c_r_exact.values);

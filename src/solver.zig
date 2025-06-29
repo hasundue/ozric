@@ -116,7 +116,13 @@ pub const Solver = struct {
         self.initSystem(density, temperature, potential);
 
         // Use exact analytical solution as initial guess
-        exact.initPYHardSphereGuess(&self.g_r, &self.h_r, &self.c_r, density, sigma);
+        exact.initPYHardSphereGuess(&self.g_r, &self.h_r, &self.c_r, density, sigma) catch |err| {
+            // If FFT fails, fall back to simple initialization
+            std.debug.print("Warning: Failed to compute exact solution for initial guess: {}\n", .{err});
+            @memset(self.g_r.values, 1.0);
+            @memset(self.h_r.values, 0.0);
+            @memset(self.c_r.values, 0.0);
+        };
     }
 
     /// Initialize system with Lennard-Jones potential
