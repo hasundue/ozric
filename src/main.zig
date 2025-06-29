@@ -394,17 +394,14 @@ fn runExactSolutionsExample(allocator: std.mem.Allocator, output_dir: []const u8
         else => return err,
     };
 
-    // Export 1D hard sphere solution
-    ozric.exact.ExactSolutions.hardSphere1D(&g_r_exact, &h_r_exact, &c_r_exact, density, sigma);
-
-    const hs_csv_path = try buildOutputPath(allocator, output_dir, "exact_hard_sphere.csv");
-    defer allocator.free(hs_csv_path);
-
     // Create a temporary solver-like structure for the exact solution
     var exact_solver = try ozric.Solver.init(allocator, grid);
     defer exact_solver.deinit();
 
-    // Copy exact values to the temporary solver
+    const csv_config = ozric.export_data.ExportConfig{ .format = .csv, .precision = 6 };
+
+    // Export 1D hard sphere solution
+    ozric.exact.ExactSolutions.hardSphere1D(&g_r_exact, &h_r_exact, &c_r_exact, density, sigma);
     @memcpy(exact_solver.g_r.values, g_r_exact.values);
     @memcpy(exact_solver.h_r.values, h_r_exact.values);
     @memcpy(exact_solver.c_r.values, c_r_exact.values);
@@ -412,8 +409,22 @@ fn runExactSolutionsExample(allocator: std.mem.Allocator, output_dir: []const u8
     exact_solver.temperature = temperature;
     exact_solver.beta = 1.0 / temperature;
 
-    const csv_config = ozric.export_data.ExportConfig{ .format = .csv, .precision = 6 };
-    try ozric.export_data.exportRadialData(allocator, &exact_solver, hs_csv_path, csv_config);
+    const hs1d_csv_path = try buildOutputPath(allocator, output_dir, "exact_hard_sphere_1d.csv");
+    defer allocator.free(hs1d_csv_path);
+    try ozric.export_data.exportRadialData(allocator, &exact_solver, hs1d_csv_path, csv_config);
+
+    // Export 3D hard sphere solution
+    ozric.exact.ExactSolutions.hardSphere3D(&g_r_exact, &h_r_exact, &c_r_exact, density, sigma);
+    @memcpy(exact_solver.g_r.values, g_r_exact.values);
+    @memcpy(exact_solver.h_r.values, h_r_exact.values);
+    @memcpy(exact_solver.c_r.values, c_r_exact.values);
+    exact_solver.density = density;
+    exact_solver.temperature = temperature;
+    exact_solver.beta = 1.0 / temperature;
+
+    const hs3d_csv_path = try buildOutputPath(allocator, output_dir, "exact_hard_sphere_3d.csv");
+    defer allocator.free(hs3d_csv_path);
+    try ozric.export_data.exportRadialData(allocator, &exact_solver, hs3d_csv_path, csv_config);
 
     // Export ideal gas solution
     ozric.exact.ExactSolutions.idealGas(&g_r_exact, &h_r_exact, &c_r_exact);
@@ -429,6 +440,7 @@ fn runExactSolutionsExample(allocator: std.mem.Allocator, output_dir: []const u8
     try ozric.export_data.exportRadialData(allocator, &exact_solver, ideal_csv_path, csv_config);
 
     std.debug.print("✅ Files saved:\n", .{});
-    std.debug.print("  - {s}/exact_hard_sphere.csv  (Hard sphere PY analytical)\n", .{output_dir});
-    std.debug.print("  - {s}/exact_ideal_gas.csv    (Ideal gas reference)\n", .{output_dir});
+    std.debug.print("  - {s}/exact_hard_sphere_1d.csv  (1D hard sphere PY analytical)\n", .{output_dir});
+    std.debug.print("  - {s}/exact_hard_sphere_3d.csv  (3D hard sphere PY analytical)\n", .{output_dir});
+    std.debug.print("  - {s}/exact_ideal_gas.csv       (Ideal gas reference)\n", .{output_dir});
 }
