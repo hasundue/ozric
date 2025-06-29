@@ -17,6 +17,7 @@ pub fn build(b: *std.Build) void {
     lib.linkSystemLibrary("blas");
     lib.linkSystemLibrary("lapack");
     lib.linkSystemLibrary("fftw3");
+    lib.linkSystemLibrary("nlopt");
 
     b.installArtifact(lib);
 
@@ -33,6 +34,7 @@ pub fn build(b: *std.Build) void {
     exe.linkSystemLibrary("blas");
     exe.linkSystemLibrary("lapack");
     exe.linkSystemLibrary("fftw3");
+    exe.linkSystemLibrary("nlopt");
 
     b.installArtifact(exe);
 
@@ -57,6 +59,7 @@ pub fn build(b: *std.Build) void {
     lib_unit_tests.linkSystemLibrary("blas");
     lib_unit_tests.linkSystemLibrary("lapack");
     lib_unit_tests.linkSystemLibrary("fftw3");
+    lib_unit_tests.linkSystemLibrary("nlopt");
 
     const run_lib_unit_tests = b.addRunArtifact(lib_unit_tests);
 
@@ -71,6 +74,7 @@ pub fn build(b: *std.Build) void {
     exe_unit_tests.linkSystemLibrary("blas");
     exe_unit_tests.linkSystemLibrary("lapack");
     exe_unit_tests.linkSystemLibrary("fftw3");
+    exe_unit_tests.linkSystemLibrary("nlopt");
 
     const run_exe_unit_tests = b.addRunArtifact(exe_unit_tests);
 

@@ -3,6 +3,7 @@ const c = @cImport({
     @cInclude("cblas.h");
     @cInclude("lapacke.h");
     @cInclude("fftw3.h");
+    @cInclude("nlopt.h");
 });
 
 pub const Solver = struct {
@@ -27,8 +28,44 @@ pub const Solver = struct {
         _ = temperature;
         
         std.log.info("Starting OZ equation solution...", .{});
-        // TODO: Implement the actual solver
+        // TODO: Implement the actual solver using NLOPT for optimization
         std.log.info("Solution completed (placeholder)", .{});
+    }
+};
+
+/// Optimization utilities using NLOPT
+pub const Optimizer = struct {
+    opt: c.nlopt_opt,
+    
+    const Self = @This();
+    
+    pub fn init(algorithm: c.nlopt_algorithm, n: u32) !Self {
+        const opt = c.nlopt_create(algorithm, n);
+        if (opt == null) {
+            return error.NloptCreateFailed;
+        }
+        
+        return Self{
+            .opt = opt,
+        };
+    }
+    
+    pub fn deinit(self: *Self) void {
+        c.nlopt_destroy(self.opt);
+    }
+    
+    pub fn setLowerBounds(self: *Self, bounds: []const f64) !void {
+        const result = c.nlopt_set_lower_bounds(self.opt, bounds.ptr);
+        if (result < 0) {
+            return error.NloptSetBoundsFailed;
+        }
+    }
+    
+    pub fn setUpperBounds(self: *Self, bounds: []const f64) !void {
+        const result = c.nlopt_set_upper_bounds(self.opt, bounds.ptr);
+        if (result < 0) {
+            return error.NloptSetBoundsFailed;
+        }
     }
 };
 
@@ -93,4 +130,15 @@ test "solver initialization" {
     defer solver.deinit();
     
     try solver.solve(0.8, 298.15);
+}
+
+test "nlopt optimizer" {
+    var optimizer = try Optimizer.init(c.NLOPT_LN_COBYLA, 2);
+    defer optimizer.deinit();
+    
+    const lower_bounds = [_]f64{ -1.0, -1.0 };
+    const upper_bounds = [_]f64{ 1.0, 1.0 };
+    
+    try optimizer.setLowerBounds(&lower_bounds);
+    try optimizer.setUpperBounds(&upper_bounds);
 }

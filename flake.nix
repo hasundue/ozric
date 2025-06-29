@@ -77,6 +77,7 @@
               blas
               lapack
               fftw
+              nlopt
               pkg-config
             ];
             packages = with pkgs; [
