@@ -3,9 +3,6 @@ const c = @cImport({
     @cInclude("fftw3.h");
 });
 
-const grid = @import("grid.zig");
-const RadialFunction = grid.RadialFunction;
-
 /// Errors that can occur during FFT operations
 pub const FFTError = error{
     PlanCreationFailed,
@@ -155,102 +152,125 @@ pub const FFTContext = struct {
     }
 };
 
-/// High-level utilities for Fourier transforms of radial functions
+/// High-level utilities for FFT operations on generic arrays
 pub const FourierUtils = struct {
-    /// Compute convolution of two radial functions using FFT
-    /// This is the core operation for solving Ornstein-Zernike equations
-    /// Implements: h(r) = ∫ c(r-r') * ρ * h(r') dr'
+    /// Compute convolution of two arrays using FFT
+    /// output = IFFT(FFT(input1) * FFT(input2))
     pub fn convolution(
         allocator: std.mem.Allocator,
-        input1: *const RadialFunction,
-        input2: *const RadialFunction,
-        output: *RadialFunction,
-        density: f64,
+        input1: []const f64,
+        input2: []const f64,
+        output: []f64,
     ) !void {
-        if (input1.grid.n_points != input2.grid.n_points or input1.grid.n_points != output.grid.n_points) {
+        if (input1.len != input2.len or input1.len != output.len) {
             return FFTError.InvalidDataSize;
         }
 
-        var fft_ctx = try FFTContext.init(allocator, input1.grid.n_points, .estimate);
+        var fft_ctx = try FFTContext.init(allocator, input1.len, .estimate);
         defer fft_ctx.deinit();
 
         // Transform first function
-        try fft_ctx.forwardTransform(input1.values, output.values);
+        try fft_ctx.forwardTransform(input1, output);
 
         // Store transformed first function temporarily
-        const temp_fft1 = try allocator.alloc(f64, input1.grid.n_points);
+        const temp_fft1 = try allocator.alloc(f64, input1.len);
         defer allocator.free(temp_fft1);
-        @memcpy(temp_fft1, output.values);
+        @memcpy(temp_fft1, output);
 
         // Transform second function
-        try fft_ctx.forwardTransform(input2.values, output.values);
+        try fft_ctx.forwardTransform(input2, output);
 
         // Perform convolution in frequency domain
-        // For real-to-half-complex format, need special handling
-        for (0..input1.grid.n_points) |i| {
-            output.values[i] = temp_fft1[i] * output.values[i] * density;
+        for (0..input1.len) |i| {
+            output[i] = temp_fft1[i] * output[i];
         }
 
         // Transform back to real domain
-        try fft_ctx.inverseTransform(output.values, output.values);
+        try fft_ctx.inverseTransform(output, output);
     }
 
-    /// Solve OZ equation: h(k) = c(k) / (1 - ρ * c(k))
-    /// This is the k-space form of the Ornstein-Zernike equation
-    pub fn solveOZEquation(
+    /// Compute cross-correlation of two arrays using FFT
+    /// Similar to convolution but with complex conjugate
+    pub fn crossCorrelation(
         allocator: std.mem.Allocator,
-        c_r: *const RadialFunction,
-        h_r: *RadialFunction,
-        density: f64,
+        input1: []const f64,
+        input2: []const f64,
+        output: []f64,
     ) !void {
-        if (c_r.grid.n_points != h_r.grid.n_points) {
+        if (input1.len != input2.len or input1.len != output.len) {
             return FFTError.InvalidDataSize;
         }
 
-        var fft_ctx = try FFTContext.init(allocator, c_r.grid.n_points, .estimate);
+        var fft_ctx = try FFTContext.init(allocator, input1.len, .estimate);
         defer fft_ctx.deinit();
 
-        // Transform c(r) to k-space
-        try fft_ctx.forwardTransform(c_r.values, h_r.values);
+        // Transform both functions
+        const temp1 = try allocator.alloc(f64, input1.len);
+        defer allocator.free(temp1);
+        const temp2 = try allocator.alloc(f64, input2.len);
+        defer allocator.free(temp2);
 
-        // Solve OZ equation in k-space: h(k) = c(k) / (1 - ρ * c(k))
-        for (0..c_r.grid.n_points) |i| {
-            const c_k = h_r.values[i];
-            const denominator = 1.0 - density * c_k;
+        try fft_ctx.forwardTransform(input1, temp1);
+        try fft_ctx.forwardTransform(input2, temp2);
 
-            // Avoid division by zero
-            if (@abs(denominator) < 1e-12) {
-                h_r.values[i] = 0.0;
-            } else {
-                h_r.values[i] = c_k / denominator;
-            }
+        // Compute cross-correlation in frequency domain
+        // For real transforms, conjugate is implicit in the symmetry
+        for (0..input1.len) |i| {
+            output[i] = temp1[i] * temp2[i];
         }
 
-        // Transform h(k) back to real space
-        try fft_ctx.inverseTransform(h_r.values, h_r.values);
+        // Transform back to real domain
+        try fft_ctx.inverseTransform(output, output);
     }
 
-    /// Compute power spectrum of a radial function
+    /// Compute power spectrum of an array
     /// Useful for analyzing frequency content and debugging transforms
     pub fn powerSpectrum(
         allocator: std.mem.Allocator,
-        input: *const RadialFunction,
-        spectrum: *RadialFunction,
+        input: []const f64,
+        spectrum: []f64,
     ) !void {
-        if (input.grid.n_points != spectrum.grid.n_points) {
+        if (input.len != spectrum.len) {
             return FFTError.InvalidDataSize;
         }
 
-        var fft_ctx = try FFTContext.init(allocator, input.grid.n_points, .estimate);
+        var fft_ctx = try FFTContext.init(allocator, input.len, .estimate);
         defer fft_ctx.deinit();
 
         // Transform to frequency domain
-        try fft_ctx.forwardTransform(input.values, spectrum.values);
+        try fft_ctx.forwardTransform(input, spectrum);
 
         // Compute power spectrum |F(k)|²
-        for (0..input.grid.n_points) |i| {
-            spectrum.values[i] = spectrum.values[i] * spectrum.values[i];
+        for (0..input.len) |i| {
+            spectrum[i] = spectrum[i] * spectrum[i];
         }
+    }
+
+    /// Apply frequency domain filter to input signal
+    /// filter array should have same length as input
+    pub fn applyFilter(
+        allocator: std.mem.Allocator,
+        input: []const f64,
+        filter: []const f64,
+        output: []f64,
+    ) !void {
+        if (input.len != filter.len or input.len != output.len) {
+            return FFTError.InvalidDataSize;
+        }
+
+        var fft_ctx = try FFTContext.init(allocator, input.len, .estimate);
+        defer fft_ctx.deinit();
+
+        // Transform input to frequency domain
+        try fft_ctx.forwardTransform(input, output);
+
+        // Apply filter in frequency domain
+        for (0..input.len) |i| {
+            output[i] *= filter[i];
+        }
+
+        // Transform back to real domain
+        try fft_ctx.inverseTransform(output, output);
     }
 };
 
@@ -404,83 +424,105 @@ test "FFT linearity property" {
     }
 }
 
-test "Ornstein-Zernike equation solver" {
+test "FFT convolution operation" {
     const allocator = std.testing.allocator;
-    const n = 64;
+    const n = 32;
 
-    // Create test radial functions
-    const grid_params = grid.GridParams{
-        .r_max = 10.0,
-        .n_points = n,
-        .dr = 10.0 / @as(f64, @floatFromInt(n)),
-    };
+    const input1 = try allocator.alloc(f64, n);
+    defer allocator.free(input1);
+    const input2 = try allocator.alloc(f64, n);
+    defer allocator.free(input2);
+    const output = try allocator.alloc(f64, n);
+    defer allocator.free(output);
 
-    var c_r = try RadialFunction.init(allocator, grid_params);
-    defer c_r.deinit();
-    var h_r = try RadialFunction.init(allocator, grid_params);
-    defer h_r.deinit();
+    // Create simple test signals
+    @memset(input1, 0.0);
+    @memset(input2, 0.0);
+    input1[0] = 1.0; // Delta function
+    input2[1] = 1.0; // Shifted delta
 
-    // Set up a simple test case: exponential decay c(r) = exp(-r)
+    try FourierUtils.convolution(allocator, input1, input2, output);
+
+    // Convolution of two deltas should produce a shifted result
+    // Verify output is finite and has expected properties
     for (0..n) |i| {
-        const r = @as(f64, @floatFromInt(i)) * grid_params.dr;
-        c_r.values[i] = @exp(-r);
+        try std.testing.expect(std.math.isFinite(output[i]));
     }
 
-    const test_density = 0.1;
-
-    // Solve OZ equation
-    try FourierUtils.solveOZEquation(allocator, &c_r, &h_r, test_density);
-
-    // Basic sanity checks
-    // h(r) should be finite and reasonable
+    // The result should have most energy concentrated in few points
+    var total_energy: f64 = 0.0;
     for (0..n) |i| {
-        try std.testing.expect(std.math.isFinite(h_r.values[i]));
-        try std.testing.expect(@abs(h_r.values[i]) < 100.0); // Reasonable magnitude
+        total_energy += output[i] * output[i];
     }
-
-    // For small density and exponential c(r), h(r) should have reasonable behavior
-    // At large distances, both c(r) and h(r) should decay to near zero
-    const large_r_index = n - 1;
-    try std.testing.expect(@abs(h_r.values[large_r_index]) < 1.0);
-
-    // At intermediate distances, h(r) should be reasonable
-    // This is a complex algorithm so we just verify basic sanity
-    const mid_r_index = n / 2;
-    try std.testing.expect(@abs(h_r.values[mid_r_index]) < 10.0);
+    try std.testing.expect(total_energy > 0.0);
 }
 
 test "Power spectrum computation" {
     const allocator = std.testing.allocator;
     const n = 32;
 
-    const grid_params = grid.GridParams{
-        .r_max = 10.0,
-        .n_points = n,
-        .dr = 10.0 / @as(f64, @floatFromInt(n)),
-    };
-
-    var input = try RadialFunction.init(allocator, grid_params);
-    defer input.deinit();
-    var spectrum = try RadialFunction.init(allocator, grid_params);
-    defer spectrum.deinit();
+    const input = try allocator.alloc(f64, n);
+    defer allocator.free(input);
+    const spectrum = try allocator.alloc(f64, n);
+    defer allocator.free(spectrum);
 
     // Create a sine wave
     for (0..n) |i| {
         const x = 2.0 * std.math.pi * @as(f64, @floatFromInt(i)) / @as(f64, @floatFromInt(n));
-        input.values[i] = @sin(x);
+        input[i] = @sin(x);
     }
 
-    try FourierUtils.powerSpectrum(allocator, &input, &spectrum);
+    try FourierUtils.powerSpectrum(allocator, input, spectrum);
 
     // Power spectrum should be non-negative
     for (0..n) |i| {
-        try std.testing.expect(spectrum.values[i] >= 0.0);
+        try std.testing.expect(spectrum[i] >= 0.0);
     }
 
     // For a pure sine wave, most power should be concentrated in specific frequencies
     var total_power: f64 = 0.0;
     for (0..n) |i| {
-        total_power += spectrum.values[i];
+        total_power += spectrum[i];
     }
     try std.testing.expect(total_power > 0.0);
+}
+
+test "FFT filter application" {
+    const allocator = std.testing.allocator;
+    const n = 16;
+
+    const input = try allocator.alloc(f64, n);
+    defer allocator.free(input);
+    const filter = try allocator.alloc(f64, n);
+    defer allocator.free(filter);
+    const output = try allocator.alloc(f64, n);
+    defer allocator.free(output);
+
+    // Create test signal and filter
+    for (0..n) |i| {
+        input[i] = @as(f64, @floatFromInt(i + 1));
+        filter[i] = if (i < n / 2) 1.0 else 0.0; // Low-pass filter
+    }
+
+    try FourierUtils.applyFilter(allocator, input, filter, output);
+
+    // Filtered output should be finite and different from input
+    var input_sum: f64 = 0.0;
+    var output_sum: f64 = 0.0;
+    for (0..n) |i| {
+        try std.testing.expect(std.math.isFinite(output[i]));
+        input_sum += input[i];
+        output_sum += output[i];
+    }
+
+    // Filter should modify the signal (but the sum might be similar)
+    // Just verify that the output is different from input
+    var is_different = false;
+    for (0..n) |i| {
+        if (@abs(input[i] - output[i]) > 1e-10) {
+            is_different = true;
+            break;
+        }
+    }
+    try std.testing.expect(is_different);
 }

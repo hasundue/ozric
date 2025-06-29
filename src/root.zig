@@ -8,6 +8,7 @@ pub const closures = @import("closures.zig");
 pub const solver = @import("solver.zig");
 pub const exact = @import("exact.zig");
 pub const fourier = @import("fourier.zig");
+pub const oz_fft = @import("oz_fft.zig");
 pub const export_data = @import("export.zig");
 
 // Re-export commonly used types for convenience
@@ -30,6 +31,7 @@ pub const Solver = solver.Solver;
 pub const FFTContext = fourier.FFTContext;
 pub const FourierUtils = fourier.FourierUtils;
 pub const PlannerStrategy = fourier.PlannerStrategy;
+pub const OZFourierSolver = oz_fft.OZFourierSolver;
 
 // Keep existing tests for compatibility
 test "hard sphere potential with PY closure" {

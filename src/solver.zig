@@ -10,6 +10,7 @@ const grid = @import("grid.zig");
 const convergence = @import("convergence.zig");
 const closures = @import("closures.zig");
 const exact = @import("exact.zig");
+const oz_fft = @import("oz_fft.zig");
 
 pub const Potential = potentials.Potential;
 pub const HardSpherePotential = potentials.HardSpherePotential;
@@ -314,49 +315,7 @@ pub const Solver = struct {
 
     /// Solve OZ equation using FFT-based convolution (efficient version)
     fn solveOZEquationFFT(self: *Self) !void {
-        const workspace = self.fft_workspace orelse return error.NoFFTWorkspace;
-        const plan_forward = self.fft_plan_forward orelse return error.NoFFTPlan;
-        const plan_backward = self.fft_plan_backward orelse return error.NoFFTPlan;
-
-        const n = self.grid.n_points;
-
-        // Copy c(r) to workspace
-        @memcpy(workspace[0..n], self.c_r.values);
-        @memset(workspace[n..], 0.0);
-
-        // Transform c(r) to k-space
-        c.fftw_execute(plan_forward);
-
-        // Store c(k) temporarily
-        const c_k = try self.allocator.alloc(f64, n);
-        defer self.allocator.free(c_k);
-        @memcpy(c_k, workspace[0..n]);
-
-        // Copy h(r) to workspace and transform
-        @memcpy(workspace[0..n], self.h_r.values);
-        @memset(workspace[n..], 0.0);
-        c.fftw_execute(plan_forward);
-
-        // Multiply in k-space: h(k) = c(k) + ρ * c(k) * h(k)
-        // Rearranging: h(k) = c(k) / (1 - ρ * c(k))
-        for (0..n) |i| {
-            const c_k_val = c_k[i];
-            const denominator = 1.0 - self.density * c_k_val;
-
-            if (@abs(denominator) > 1e-10) {
-                workspace[i] = c_k_val / denominator;
-            } else {
-                workspace[i] = c_k_val; // Fallback to prevent division by zero
-            }
-        }
-
-        // Transform back to real space
-        c.fftw_execute(plan_backward);
-
-        // Normalize and copy back
-        const norm = 1.0 / @as(f64, @floatFromInt(n));
-        for (0..n) |i| {
-            self.h_r.values[i] = workspace[i] * norm;
-        }
+        // Use the dedicated OZ FFT solver
+        try oz_fft.OZFourierSolver.solveOZEquation(self.allocator, &self.c_r, &self.h_r, self.density);
     }
 };
