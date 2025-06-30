@@ -37,16 +37,12 @@
     // internet connectivity.
     .dependencies = .{
         .ceres = .{
-            .url = "https://github.com/ceres-solver/ceres-solver/archive/refs/heads/master.tar.gz",
-            .hash = "N-V-__8AAE2FsgClNrgDkJ15xBNaN543qYMb5gfR6mnUJzAr",
+            .url = "https://github.com/ceres-solver/ceres-solver/archive/refs/tags/2.2.0.tar.gz",
+            .hash = "N-V-__8AAAwZyQAma1OByLx2AKj3upoY7FxoS7bQ1LBLR2m3",
         },
         .eigen = .{
             .url = "https://gitlab.com/libeigen/eigen/-/archive/3.4.0/eigen-3.4.0.tar.gz",
             .hash = "N-V-__8AABPI6wAbBLaww8cKO-HchZ0ft-BxUOEOyQtTSccD",
-        },
-        .abseil = .{
-            .url = "https://github.com/abseil/abseil-cpp/archive/refs/heads/master.tar.gz",
-            .hash = "N-V-__8AADPonwABZVIiPcIvz1dzB_l256JRZlwNvUtFQkq4",
         },
     },
     .paths = .{

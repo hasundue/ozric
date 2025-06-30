@@ -1,7 +1,7 @@
-// Simple test - just include a basic header first
-// #include "ceres/ceres.h"
+// Test including ceres headers
+#include "ceres/version.h"
 
-// Empty for now to test build system
-extern "C" void test_ceres() {
-    // Placeholder function
+// Simple function that uses ceres header
+extern "C" int test_ceres() {
+    return CERES_VERSION_MAJOR;
 }

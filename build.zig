@@ -14,11 +14,6 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
 
-    const abseil = b.dependency("abseil", .{
-        .target = target,
-        .optimize = optimize,
-    });
-
     const lib_mod = b.createModule(.{
         .root_source_file = b.path("src/root.zig"),
         .target = target,
@@ -36,10 +31,9 @@ pub fn build(b: *std.Build) void {
         .files = &.{"solver.cc"},
     });
 
-    // Add minimal ceres source files to start - will expand gradually
+    // Add minimal ceres source files with MINIGLOG for 2.2.0
     const ceres_sources = [_][]const u8{
-        "file.cc", // Simple utility file
-        // Start with just one file to test the build system
+        "file.cc", // Simple utility file that now uses glog instead of absl
     };
 
     lib.addCSourceFiles(.{
@@ -53,6 +47,18 @@ pub fn build(b: *std.Build) void {
             "-DCERES_NO_EXPORT=", // Define CERES_NO_EXPORT as empty
             "-DCERES_NO_PROTOCOL_BUFFERS",
             "-DCERES_NO_THREADS",
+            "-DMINIGLOG", // Use minimal logging instead of full glog
+        },
+    });
+
+    // Add miniglog source file
+    lib.addCSourceFiles(.{
+        .root = ceres.path("internal/ceres/miniglog/glog"),
+        .files = &.{"logging.cc"},
+        .flags = &.{
+            "-std=c++17",
+            "-DCERES_EXPORT=", // Define CERES_EXPORT as empty for miniglog too
+            "-DCERES_NO_EXPORT=", // Define CERES_NO_EXPORT as empty for miniglog too
         },
     });
 
@@ -61,26 +67,13 @@ pub fn build(b: *std.Build) void {
     lib.addIncludePath(ceres.path(".")); // For internal headers
     lib.addIncludePath(ceres.path("internal")); // For internal ceres headers
     lib.addIncludePath(ceres.path("config")); // For config headers like export.h
+    lib.addIncludePath(ceres.path("internal/ceres/miniglog")); // For miniglog headers
 
     // Add Eigen include directory
     lib.addIncludePath(eigen.path(".")); // Eigen is header-only
 
-    // Add Abseil include directory
-    lib.addIncludePath(abseil.path("."));
-
-    // Add required Abseil source files
-    const abseil_sources = [_][]const u8{
-        "base/log_severity.cc",
-        "base/internal/raw_logging.cc",
-        "log/internal/log_message.cc",
-        // Add more Abseil sources as needed
-    };
-
-    lib.addCSourceFiles(.{
-        .root = abseil.path("absl"),
-        .files = &abseil_sources,
-        .flags = &.{"-std=c++17"},
-    });
+    // MINIGLOG eliminates the need for Abseil dependencies
+    // lib.addIncludePath(abseil.path("."));
 
     lib.linkLibC();
     lib.linkLibCpp();
