@@ -17,9 +17,9 @@
 #define CERES_EXPORT
 #define CERES_NO_EXPORT
 
-// Include ceres headers (use full path to avoid recursion)
-#include "/home/hasundue/.cache/zig/p/N-V-__8AAAwZyQAma1OByLx2AKj3upoY7FxoS7bQ1LBLR2m3/include/ceres/version.h"
-#include "/home/hasundue/.cache/zig/p/N-V-__8AAAwZyQAma1OByLx2AKj3upoY7FxoS7bQ1LBLR2m3/include/ceres/ceres.h"
+// Include ceres headers
+#include "ceres/version.h"
+#include "ceres/ceres.h"
 
 // Restore original definitions
 #pragma pop_macro("CERES_NO_EXPORT")
