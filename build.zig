@@ -137,8 +137,53 @@ pub fn build(b: *std.Build) void {
         // Linear least squares support
         "linear_least_squares_problems.cc",
 
-        // Additional linear solvers
+        // Dense matrix linear algebra
+        "dense_cholesky.cc",
         "dense_normal_cholesky_solver.cc",
+
+        // Sparse matrix operations
+        "dynamic_compressed_row_sparse_matrix.cc",
+        "sparse_cholesky.cc",
+
+        // Preconditioner systems
+        "preconditioner.cc",
+        "block_jacobi_preconditioner.cc",
+        "subset_preconditioner.cc",
+        "schur_jacobi_preconditioner.cc",
+        "power_series_expansion_preconditioner.cc",
+
+        // Additional linear solvers
+        "cgnr_solver.cc",
+        "iterative_schur_complement_solver.cc",
+        "sparse_normal_cholesky_solver.cc",
+        "dynamic_sparse_normal_cholesky_solver.cc",
+
+        // Line search and optimization
+        "line_search.cc",
+        "line_search_direction.cc",
+        "line_search_minimizer.cc",
+        "line_search_preprocessor.cc",
+
+        // Advanced mathematics
+        "polynomial.cc",
+        "function_sample.cc",
+        "trust_region_step_evaluator.cc",
+        "low_rank_inverse_hessian.cc",
+
+        // Schur complement methods
+        "schur_eliminator.cc",
+        "implicit_schur_complement.cc",
+
+        // Block matrix operations
+        "block_random_access_diagonal_matrix.cc",
+        "block_random_access_sparse_matrix.cc",
+        "block_random_access_dense_matrix.cc",
+
+        // Computational utilities
+        "inner_product_computer.cc",
+        "iterative_refiner.cc",
+        "compressed_col_sparse_matrix_utils.cc",
+        "residual_block_utils.cc",
 
         // File I/O operations
         "file.cc",
@@ -149,11 +194,76 @@ pub fn build(b: *std.Build) void {
         // Context
         "context.cc",
         "context_impl.cc",
+
+        // Additional algorithm implementations
+        "dogleg_strategy.cc",
+        "schur_complement_solver.cc",
+        "visibility_based_preconditioner.cc",
+
+        // Visibility and clustering algorithms
+        "visibility.cc",
+        "canonical_views_clustering.cc",
+        "single_linkage_clustering.cc",
+        "block_random_access_matrix.cc",
+
+        // Template specialization base classes
+        "partitioned_matrix_view.cc",
     };
 
     lib.addCSourceFiles(.{
         .root = ceres.path("internal/ceres"),
         .files = &essential_ceres_sources,
+        .flags = ceres_flags,
+    });
+
+    // Add generated template specializations for SchurEliminator and PartitionedMatrixView
+    const generated_template_sources = [_][]const u8{
+        // SchurEliminator specializations
+        "schur_eliminator_2_2_2.cc",
+        "schur_eliminator_2_2_3.cc",
+        "schur_eliminator_2_2_4.cc",
+        "schur_eliminator_2_2_d.cc",
+        "schur_eliminator_2_3_3.cc",
+        "schur_eliminator_2_3_4.cc",
+        "schur_eliminator_2_3_9.cc",
+        "schur_eliminator_2_3_d.cc",
+        "schur_eliminator_2_4_3.cc",
+        "schur_eliminator_2_4_4.cc",
+        "schur_eliminator_2_4_8.cc",
+        "schur_eliminator_2_4_9.cc",
+        "schur_eliminator_2_4_d.cc",
+        "schur_eliminator_2_d_d.cc",
+        "schur_eliminator_4_4_2.cc",
+        "schur_eliminator_4_4_3.cc",
+        "schur_eliminator_4_4_4.cc",
+        "schur_eliminator_4_4_d.cc",
+        "schur_eliminator_d_d_d.cc",
+
+        // PartitionedMatrixView specializations
+        "partitioned_matrix_view_2_2_2.cc",
+        "partitioned_matrix_view_2_2_3.cc",
+        "partitioned_matrix_view_2_2_4.cc",
+        "partitioned_matrix_view_2_2_d.cc",
+        "partitioned_matrix_view_2_3_3.cc",
+        "partitioned_matrix_view_2_3_4.cc",
+        "partitioned_matrix_view_2_3_9.cc",
+        "partitioned_matrix_view_2_3_d.cc",
+        "partitioned_matrix_view_2_4_3.cc",
+        "partitioned_matrix_view_2_4_4.cc",
+        "partitioned_matrix_view_2_4_8.cc",
+        "partitioned_matrix_view_2_4_9.cc",
+        "partitioned_matrix_view_2_4_d.cc",
+        "partitioned_matrix_view_2_d_d.cc",
+        "partitioned_matrix_view_4_4_2.cc",
+        "partitioned_matrix_view_4_4_3.cc",
+        "partitioned_matrix_view_4_4_4.cc",
+        "partitioned_matrix_view_4_4_d.cc",
+        "partitioned_matrix_view_d_d_d.cc",
+    };
+
+    lib.addCSourceFiles(.{
+        .root = ceres.path("internal/ceres/generated"),
+        .files = &generated_template_sources,
         .flags = ceres_flags,
     });
 
