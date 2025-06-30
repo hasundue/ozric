@@ -100,12 +100,51 @@ pub fn build(b: *std.Build) void {
 
         // Mathematical utilities
         "gradient_checker.cc",
+        "is_close.cc",
 
         // Dense matrix support
         "dense_sparse_matrix.cc",
 
-        // Parallel utilities
+        // Parallel operations
+        "parallel_vector_ops.cc",
+        "parallel_invoke.cc",
         "parallel_utils.cc",
+
+        // Solver utilities and templates
+        "solver_utils.cc",
+        "schur_templates.cc",
+
+        // Block structure and jacobian support
+        "block_structure.cc",
+        "scratch_evaluate_preparer.cc",
+        "dynamic_compressed_row_jacobian_writer.cc",
+
+        // Parameter ordering and preprocessing
+        "parameter_block_ordering.cc",
+        "trust_region_preprocessor.cc",
+        "reorder_program.cc",
+        "coordinate_descent_minimizer.cc",
+
+        // Callback support
+        "iteration_callback.cc",
+        "gradient_problem_solver.cc",
+        "callbacks.cc",
+        "evaluation_callback.cc",
+
+        // Gradient problem support
+        "gradient_problem.cc",
+
+        // Linear least squares support
+        "linear_least_squares_problems.cc",
+
+        // Additional linear solvers
+        "dense_normal_cholesky_solver.cc",
+
+        // File I/O operations
+        "file.cc",
+
+        // Gradient checking support
+        "gradient_checking_cost_function.cc",
 
         // Context
         "context.cc",
