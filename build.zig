@@ -22,7 +22,7 @@ pub fn build(b: *std.Build) void {
 
     const lib = b.addLibrary(.{
         .linkage = .static,
-        .name = "default",
+        .name = "ozric",
         .root_module = lib_mod,
     });
 
@@ -83,16 +83,35 @@ pub fn build(b: *std.Build) void {
 
     b.installArtifact(lib);
 
+    const wasm_mod = b.createModule(.{
+        .root_source_file = b.path("src/wasm.zig"),
+        .target = b.resolveTargetQuery(.{
+            .cpu_arch = .wasm32,
+            .os_tag = .wasi,
+        }),
+        .optimize = optimize,
+    });
+
+    wasm_mod.addImport("ozric_lib", lib_mod);
+
+    const wasm_lib = b.addLibrary(.{
+        .linkage = .static,
+        .name = "libozric_wasm",
+        .root_module = wasm_mod,
+    });
+
+    b.installArtifact(wasm_lib);
+
     const exe_mod = b.createModule(.{
         .root_source_file = b.path("src/main.zig"),
         .target = target,
         .optimize = optimize,
     });
 
-    exe_mod.addImport("default_lib", lib_mod);
+    exe_mod.addImport("ozric_lib", lib_mod);
 
     const exe = b.addExecutable(.{
-        .name = "default",
+        .name = "ozric",
         .root_module = exe_mod,
     });
 
