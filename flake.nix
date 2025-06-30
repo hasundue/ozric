@@ -103,6 +103,7 @@
           let
             treefmt = lib.treefmt-nix.mkWrapper pkgs {
               programs.nixfmt.enable = true;
+              programs.zig.enable = true;
             };
             githooks = lib.githooks-nix.${system}.run {
               src = ./.;
