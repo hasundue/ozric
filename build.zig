@@ -31,34 +31,86 @@ pub fn build(b: *std.Build) void {
         .files = &.{"solver.cc"},
     });
 
-    // Add minimal ceres source files with MINIGLOG for 2.2.0
-    const ceres_sources = [_][]const u8{
-        "file.cc", // Simple utility file that now uses glog instead of absl
+    // Add all ceres source files recursively with MINIGLOG for 2.2.0
+    const ceres_flags = &.{
+        "-std=c++17",
+        "-DCERES_NO_SUITESPARSE",
+        "-DCERES_NO_CXSPARSE",
+        "-DCERES_EXPORT=", // Define CERES_EXPORT as empty
+        "-DCERES_NO_EXPORT=", // Define CERES_NO_EXPORT as empty
+        "-DCERES_NO_PROTOCOL_BUFFERS",
+        "-DCERES_NO_THREADS",
+        "-DCERES_NO_CUDA", // Disable CUDA support
+        "-DCERES_CONTEXT_IMPL_H", // Disable context_impl.h
+        "-DCERES_METIS_VERSION=\"5.1.0\"", // Define METIS version
+        "-DMINIGLOG", // Use minimal logging instead of full glog
+    };
+
+    // Add comprehensive ceres source files for full Problem/Solver functionality
+    const essential_ceres_sources = [_][]const u8{
+        // Core utilities
+        "file.cc",
+        "wall_time.cc",
+        "stringprintf.cc",
+        "array_utils.cc",
+        "types.cc",
+
+        // Problem and cost functions
+        "problem.cc",
+        "problem_impl.cc",
+        "cost_function.cc",
+        "loss_function.cc",
+        "corrector.cc",
+        "residual_block.cc",
+        "residual_block_utils.cc",
+
+        // Solver core
+        "solver.cc",
+        // "solver_utils.cc", // Skip due to METIS version dependencies
+        "callbacks.cc",
+        "minimizer.cc",
+        "trust_region_minimizer.cc",
+        "trust_region_strategy.cc",
+        "levenberg_marquardt_strategy.cc",
+        "dogleg_strategy.cc",
+
+        // Linear solvers (minimal set)
+        "linear_solver.cc",
+        "dense_qr_solver.cc",
+        "dense_qr.cc",
+        "dense_cholesky.cc",
+
+        // Program structure
+        "program.cc",
+        "parameter_block_ordering.cc",
+        "preprocessor.cc",
+        "manifold.cc",
+
+        // Evaluation
+        "evaluator.cc",
+        "block_evaluate_preparer.cc",
+        "scratch_evaluate_preparer.cc",
+        "evaluation_callback.cc",
+
+        // Context (minimal, excluding context_impl which has CUDA dependencies)
+        "context.cc",
     };
 
     lib.addCSourceFiles(.{
         .root = ceres.path("internal/ceres"),
-        .files = &ceres_sources,
-        .flags = &.{
-            "-std=c++17",
-            "-DCERES_NO_SUITESPARSE",
-            "-DCERES_NO_CXSPARSE",
-            "-DCERES_EXPORT=", // Define CERES_EXPORT as empty
-            "-DCERES_NO_EXPORT=", // Define CERES_NO_EXPORT as empty
-            "-DCERES_NO_PROTOCOL_BUFFERS",
-            "-DCERES_NO_THREADS",
-            "-DMINIGLOG", // Use minimal logging instead of full glog
-        },
+        .files = &essential_ceres_sources,
+        .flags = ceres_flags,
     });
 
-    // Add miniglog source file
+    // Add miniglog source file with proper export macros
     lib.addCSourceFiles(.{
         .root = ceres.path("internal/ceres/miniglog/glog"),
         .files = &.{"logging.cc"},
         .flags = &.{
             "-std=c++17",
-            "-DCERES_EXPORT=", // Define CERES_EXPORT as empty for miniglog too
-            "-DCERES_NO_EXPORT=", // Define CERES_NO_EXPORT as empty for miniglog too
+            "-DCERES_EXPORT=", // Define CERES_EXPORT as empty
+            "-DCERES_NO_EXPORT=", // Define CERES_NO_EXPORT as empty
+            "-DMINIGLOG", // Use minimal logging
         },
     });
 
@@ -83,24 +135,25 @@ pub fn build(b: *std.Build) void {
 
     b.installArtifact(lib);
 
-    const wasm_mod = b.createModule(.{
-        .root_source_file = b.path("src/wasm.zig"),
-        .target = b.resolveTargetQuery(.{
-            .cpu_arch = .wasm32,
-            .os_tag = .wasi,
-        }),
-        .optimize = optimize,
-    });
+    // TODO: Re-enable WASM when ceres compilation is stable
+    // const wasm_mod = b.createModule(.{
+    //     .root_source_file = b.path("src/wasm.zig"),
+    //     .target = b.resolveTargetQuery(.{
+    //         .cpu_arch = .wasm32,
+    //         .os_tag = .wasi,
+    //     }),
+    //     .optimize = optimize,
+    // });
 
-    wasm_mod.addImport("ozric_lib", lib_mod);
+    // wasm_mod.addImport("ozric_lib", lib_mod);
 
-    const wasm_lib = b.addLibrary(.{
-        .linkage = .static,
-        .name = "libozric_wasm",
-        .root_module = wasm_mod,
-    });
+    // const wasm_lib = b.addLibrary(.{
+    //     .linkage = .static,
+    //     .name = "libozric_wasm",
+    //     .root_module = wasm_mod,
+    // });
 
-    b.installArtifact(wasm_lib);
+    // b.installArtifact(wasm_lib);
 
     const exe_mod = b.createModule(.{
         .root_source_file = b.path("src/main.zig"),

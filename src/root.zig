@@ -12,6 +12,10 @@ pub fn getCeresVersion() i32 {
     return c.test_ceres();
 }
 
+pub fn runHelloWorld() f64 {
+    return c.run_hello_world();
+}
+
 pub export fn add(a: i32, b: i32) i32 {
     return a + b;
 }

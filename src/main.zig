@@ -9,6 +9,10 @@ pub fn main() !void {
     std.debug.print("Ozric - Ornstein-Zernike equation solver\n", .{});
     std.debug.print("Using Ceres Solver version: {d}\n", .{ceres_version});
 
+    // Run the hello world example
+    const result = lib.runHelloWorld();
+    std.debug.print("Hello World result: x = {d} (should be ~10.0)\n", .{result});
+
     // stdout is for the actual output of your application, for example if you
     // are implementing gzip, then only the compressed bytes should be sent to
     // stdout, not any debugging messages.
@@ -16,7 +20,7 @@ pub fn main() !void {
     var bw = std.io.bufferedWriter(stdout_file);
     const stdout = bw.writer();
 
-    try stdout.print("Ceres-solver integration working!\n", .{});
+    try stdout.print("Ceres-solver hello world completed!\n", .{});
 
     try bw.flush(); // Don't forget to flush!
 }
