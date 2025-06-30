@@ -41,59 +41,75 @@ pub fn build(b: *std.Build) void {
         "-DCERES_NO_PROTOCOL_BUFFERS",
         "-DCERES_NO_THREADS",
         "-DCERES_NO_CUDA", // Disable CUDA support
-        "-DCERES_CONTEXT_IMPL_H", // Disable context_impl.h
+        "-DCERES_NO_LAPACK", // Disable LAPACK dependencies
         "-DCERES_METIS_VERSION=\"5.1.0\"", // Define METIS version
         "-DMINIGLOG", // Use minimal logging instead of full glog
+        "-DCERES_RESTRICT_SCHUR_SPECIALIZATION", // Restrict Schur specializations
+        "-DCERES_NO_ACCELERATE_SPARSE", // Disable Accelerate sparse support
     };
 
-    // Add comprehensive ceres source files for full Problem/Solver functionality
+    // Add ceres source files with required threading support
     const essential_ceres_sources = [_][]const u8{
         // Core utilities
-        "file.cc",
-        "wall_time.cc",
-        "stringprintf.cc",
         "array_utils.cc",
-        "types.cc",
+        "stringprintf.cc",
+        "wall_time.cc",
 
-        // Problem and cost functions
+        // Problem core
         "problem.cc",
         "problem_impl.cc",
         "cost_function.cc",
         "loss_function.cc",
         "corrector.cc",
         "residual_block.cc",
-        "residual_block_utils.cc",
 
-        // Solver core
+        // Solver core and utilities
         "solver.cc",
-        // "solver_utils.cc", // Skip due to METIS version dependencies
-        "callbacks.cc",
         "minimizer.cc",
         "trust_region_minimizer.cc",
         "trust_region_strategy.cc",
         "levenberg_marquardt_strategy.cc",
-        "dogleg_strategy.cc",
+        "types.cc",
 
-        // Linear solvers (minimal set)
+        // Basic linear solver (QR only)
         "linear_solver.cc",
         "dense_qr_solver.cc",
         "dense_qr.cc",
-        "dense_cholesky.cc",
 
-        // Program structure
+        // Program structure and utilities
         "program.cc",
-        "parameter_block_ordering.cc",
         "preprocessor.cc",
         "manifold.cc",
+        "detect_structure.cc",
 
-        // Evaluation
+        // Evaluation basics
         "evaluator.cc",
         "block_evaluate_preparer.cc",
-        "scratch_evaluate_preparer.cc",
-        "evaluation_callback.cc",
+        "block_jacobian_writer.cc",
+        "compressed_row_jacobian_writer.cc",
+        "block_sparse_matrix.cc",
+        "compressed_row_sparse_matrix.cc",
+        "triplet_sparse_matrix.cc",
 
-        // Context (minimal, excluding context_impl which has CUDA dependencies)
+        // Threading support (required)
+        "thread_pool.cc",
+
+        // Sparse matrix base class and linear operators
+        "sparse_matrix.cc",
+        "linear_operator.cc",
+
+        // Mathematical utilities
+        "gradient_checker.cc",
+
+        // Dense matrix support
+        "dense_sparse_matrix.cc",
+
+        // Parallel utilities
+        "parallel_utils.cc",
+
+        // Context
         "context.cc",
+        "context_impl.cc",
     };
 
     lib.addCSourceFiles(.{
