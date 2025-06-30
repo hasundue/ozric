@@ -72,15 +72,14 @@ pub fn build(b: *std.Build) void {
     // Add Eigen include directory
     lib.addIncludePath(eigen.path(".")); // Eigen is header-only
 
+    // Add our local include directory
+    lib.addIncludePath(b.path("include"));
+
     // MINIGLOG eliminates the need for Abseil dependencies
     // lib.addIncludePath(abseil.path("."));
 
     lib.linkLibC();
     lib.linkLibCpp();
-
-    lib.installHeadersDirectory(ceres.path("include"), "", .{
-        .include_extensions = &.{".h"},
-    });
 
     b.installArtifact(lib);
 
