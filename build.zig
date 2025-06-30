@@ -9,6 +9,16 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
 
+    const eigen = b.dependency("eigen", .{
+        .target = target,
+        .optimize = optimize,
+    });
+
+    const abseil = b.dependency("abseil", .{
+        .target = target,
+        .optimize = optimize,
+    });
+
     const lib_mod = b.createModule(.{
         .root_source_file = b.path("src/root.zig"),
         .target = target,
@@ -26,24 +36,52 @@ pub fn build(b: *std.Build) void {
         .files = &.{"solver.cc"},
     });
 
-    // Add all ceres source files for static compilation
+    // Add minimal ceres source files to start - will expand gradually
     const ceres_sources = [_][]const u8{
-        "sparse_cholesky.cc",              "file.cc",                         "problem_impl.cc",                     "cgnr_solver.cc",
-        "levenberg_marquardt_strategy.cc", "dense_normal_cholesky_solver.cc", "block_random_access_dense_matrix.cc", "normal_prior.cc",
-        "solver.cc",                       "problem.cc",                      "covariance_impl.cc",
-        "gradient_problem.cc",
-        // Add more core files as needed - this is a minimal set
+        "file.cc", // Simple utility file
+        // Start with just one file to test the build system
     };
 
     lib.addCSourceFiles(.{
         .root = ceres.path("internal/ceres"),
         .files = &ceres_sources,
-        .flags = &.{ "-std=c++17", "-DCERES_NO_SUITESPARSE", "-DCERES_NO_CXSPARSE" },
+        .flags = &.{
+            "-std=c++17",
+            "-DCERES_NO_SUITESPARSE",
+            "-DCERES_NO_CXSPARSE",
+            "-DCERES_EXPORT=", // Define CERES_EXPORT as empty
+            "-DCERES_NO_EXPORT=", // Define CERES_NO_EXPORT as empty
+            "-DCERES_NO_PROTOCOL_BUFFERS",
+            "-DCERES_NO_THREADS",
+        },
     });
 
     // Add ceres include directories
     lib.addIncludePath(ceres.path("include"));
     lib.addIncludePath(ceres.path(".")); // For internal headers
+    lib.addIncludePath(ceres.path("internal")); // For internal ceres headers
+    lib.addIncludePath(ceres.path("config")); // For config headers like export.h
+
+    // Add Eigen include directory
+    lib.addIncludePath(eigen.path(".")); // Eigen is header-only
+
+    // Add Abseil include directory
+    lib.addIncludePath(abseil.path("."));
+
+    // Add required Abseil source files
+    const abseil_sources = [_][]const u8{
+        "base/log_severity.cc",
+        "base/internal/raw_logging.cc",
+        "log/internal/log_message.cc",
+        // Add more Abseil sources as needed
+    };
+
+    lib.addCSourceFiles(.{
+        .root = abseil.path("absl"),
+        .files = &abseil_sources,
+        .flags = &.{"-std=c++17"},
+    });
+
     lib.linkLibC();
     lib.linkLibCpp();
 

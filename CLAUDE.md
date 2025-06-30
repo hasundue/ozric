@@ -4,7 +4,10 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Ozric is an Ornstein-Zernike (OZ) equation solver that leverages ceres-solver for optimization, cross-compiled with Zig. The project integrates C++ numerical optimization libraries for solving nonlinear systems in statistical mechanics and liquid theory.
+Ozric is an Ornstein-Zernike (OZ) equation solver that leverages ceres-solver for optimization, cross-compiled with Zig. The project **statically compiles ceres-solver from source** using Zig's build system, integrating C++ numerical optimization libraries for solving nonlinear systems in statistical mechanics and liquid theory.
+
+### Core Design Principle
+**IMPORTANT**: This project compiles ceres-solver from source using Zig, NOT using pre-built libraries. Static compilation with Zig is fundamental to the project architecture.
 
 ## Development Environment
 
@@ -85,8 +88,14 @@ nix run .#test     # Run tests via Nix
 - **Cross-compilation**: Supports all Zig target platforms via Nix
 - **IDE support**: ZLS (Zig Language Server) and Neovim integration
 
+### Current Integration Points
+- **ceres-solver source compilation**: Statically compiling ceres C++ sources with Zig build system
+- **Missing dependencies**: Need to add Eigen linear algebra library for ceres compilation
+- **Header generation**: Need to generate missing internal headers (e.g., ceres/internal/export.h)
+- **Include path configuration**: Require proper internal include paths for ceres build
+
 ### Future Integration Points
-- **ceres-solver integration**: Architecture prepared for C++ optimization library binding
-- **Cross-compilation**: Zig build system ready for C++ library linking
-- **Domain-specific code**: Foundation prepared for OZ equation system implementation
+- **Complete ceres-solver integration**: Full static compilation of ceres with all dependencies
+- **Eigen dependency**: Add Eigen library for linear algebra operations required by ceres
+- **OZ equation implementation**: Domain-specific code for Ornstein-Zernike equation solving
 - **Package naming**: Currently uses template names ("default") - ready for project-specific naming
