@@ -256,30 +256,109 @@ pub fn build(b: *std.Build) void {
     // MINIGLOG eliminates the need for Abseil dependencies
     // lib.addIncludePath(abseil.path("."));
 
-    lib.linkLibC();
     lib.linkLibCpp();
 
     b.installArtifact(lib);
 
-    // TODO: Re-enable WASM when ceres compilation is stable
-    // const wasm_mod = b.createModule(.{
-    //     .root_source_file = b.path("src/wasm.zig"),
-    //     .target = b.resolveTargetQuery(.{
-    //         .cpu_arch = .wasm32,
-    //         .os_tag = .wasi,
-    //     }),
-    //     .optimize = optimize,
-    // });
+    // Create WASM-compatible library (without threading support)
+    const wasm_target = b.resolveTargetQuery(.{
+        .cpu_arch = .wasm32,
+        .os_tag = .wasi,
+    });
 
-    // wasm_mod.addImport("ozric_lib", lib_mod);
+    const wasm_lib_mod = b.createModule(.{
+        .root_source_file = b.path("src/root.zig"),
+        .target = wasm_target,
+        .optimize = optimize,
+    });
 
-    // const wasm_lib = b.addLibrary(.{
-    //     .linkage = .static,
-    //     .name = "libozric_wasm",
-    //     .root_module = wasm_mod,
-    // });
+    const wasm_lib = b.addLibrary(.{
+        .linkage = .static,
+        .name = "ozric_wasm_lib",
+        .root_module = wasm_lib_mod,
+    });
 
-    // b.installArtifact(wasm_lib);
+    // WASM-specific flags (more restrictive than native)
+    const wasm_ceres_flags = &.{
+        "-std=c++17",
+        "-DCERES_NO_SUITESPARSE",
+        "-DCERES_NO_CXSPARSE",
+        "-DCERES_EXPORT=",
+        "-DCERES_NO_EXPORT=",
+        "-DCERES_NO_PROTOCOL_BUFFERS",
+        "-DCERES_NO_THREADS",
+        "-DCERES_NO_CUDA",
+        "-DCERES_NO_LAPACK",
+        "-DCERES_METIS_VERSION=\"5.1.0\"",
+        "-DMINIGLOG",
+        "-DCERES_RESTRICT_SCHUR_SPECIALIZATION",
+        "-DCERES_NO_ACCELERATE_SPARSE",
+        "-DCERES_NO_CUSTOM_BLAS", // Disable custom BLAS
+        "-fno-exceptions", // Disable C++ exceptions for WASM
+        "-fno-rtti", // Disable runtime type info for smaller binary
+    };
+
+    // Minimal Ceres sources for WASM (avoid all threading dependencies)
+    const wasm_ceres_sources = [_][]const u8{
+        // Only the most essential utilities
+        "stringprintf.cc",
+        "wall_time.cc",
+        "types.cc",
+
+        // Basic cost/loss functions only
+        "cost_function.cc",
+        "loss_function.cc",
+
+        // Math utilities
+        "is_close.cc",
+    };
+
+    // Add solver source
+    wasm_lib.addCSourceFiles(.{
+        .root = b.path("src"),
+        .files = &.{"solver.cc"},
+    });
+
+    // Add minimal Ceres sources for WASM
+    wasm_lib.addCSourceFiles(.{
+        .root = ceres.path("internal/ceres"),
+        .files = &wasm_ceres_sources,
+        .flags = wasm_ceres_flags,
+    });
+
+    // Add miniglog for WASM
+    wasm_lib.addCSourceFiles(.{
+        .root = ceres.path("internal/ceres/miniglog/glog"),
+        .files = &.{"logging.cc"},
+        .flags = wasm_ceres_flags,
+    });
+
+    // Add include paths for WASM
+    wasm_lib.addIncludePath(ceres.path("include"));
+    wasm_lib.addIncludePath(ceres.path("."));
+    wasm_lib.addIncludePath(ceres.path("internal"));
+    wasm_lib.addIncludePath(ceres.path("config"));
+    wasm_lib.addIncludePath(ceres.path("internal/ceres/miniglog"));
+    wasm_lib.addIncludePath(eigen.path("."));
+    wasm_lib.addIncludePath(b.path("include"));
+
+    wasm_lib.linkLibCpp();
+
+    const wasm_mod = b.createModule(.{
+        .root_source_file = b.path("src/wasm.zig"),
+        .target = wasm_target,
+        .optimize = optimize,
+    });
+
+    wasm_mod.addImport("ozric_lib", wasm_lib_mod);
+
+    const wasm_exe = b.addExecutable(.{
+        .name = "ozric",
+        .root_module = wasm_mod,
+    });
+
+    b.installArtifact(wasm_lib);
+    b.installArtifact(wasm_exe);
 
     const exe_mod = b.createModule(.{
         .root_source_file = b.path("src/main.zig"),

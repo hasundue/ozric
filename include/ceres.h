@@ -17,6 +17,9 @@
 #define CERES_EXPORT
 #define CERES_NO_EXPORT
 
+// WASM threading stubs - only provide what's absolutely needed
+// Remove atomic stub since it conflicts with Eigen
+
 // Include ceres headers
 #include "ceres/version.h"
 #include "ceres/ceres.h"
