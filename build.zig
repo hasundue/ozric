@@ -312,9 +312,10 @@ pub fn build(b: *std.Build) void {
         "-DCERES_NO_CUSTOM_BLAS",
         "-fno-exceptions", // Disable C++ exceptions for WASM
         "-fno-rtti", // Disable runtime type info for smaller binary
+        "-D__wasm__", // Define __wasm__ for our threading stub detection
     };
 
-    // Minimal Ceres sources for WASM (avoid all threading dependencies)
+    // Ultra-minimal WASM sources (just test version number for now)
     const wasm_ceres_sources = [_][]const u8{
         "stringprintf.cc",
         "wall_time.cc",
