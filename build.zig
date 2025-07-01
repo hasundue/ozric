@@ -260,7 +260,7 @@ pub fn build(b: *std.Build) void {
 
     b.installArtifact(lib);
 
-    // Create WASM-compatible library (without threading support)
+    // Create WASM executable with minimal library module (no library artifact)
     const wasm_target = b.resolveTargetQuery(.{
         .cpu_arch = .wasm32,
         .os_tag = .wasi,
@@ -272,10 +272,26 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
 
-    const wasm_lib = b.addLibrary(.{
-        .linkage = .static,
-        .name = "ozric_wasm_lib",
-        .root_module = wasm_lib_mod,
+    // Add include paths to the WASM library module for C imports
+    wasm_lib_mod.addIncludePath(ceres.path("include"));
+    wasm_lib_mod.addIncludePath(ceres.path("."));
+    wasm_lib_mod.addIncludePath(ceres.path("internal"));
+    wasm_lib_mod.addIncludePath(ceres.path("config"));
+    wasm_lib_mod.addIncludePath(ceres.path("internal/ceres/miniglog"));
+    wasm_lib_mod.addIncludePath(eigen.path("."));
+    wasm_lib_mod.addIncludePath(b.path("include"));
+
+    const wasm_mod = b.createModule(.{
+        .root_source_file = b.path("src/wasm.zig"),
+        .target = wasm_target,
+        .optimize = optimize,
+    });
+
+    wasm_mod.addImport("ozric_lib", wasm_lib_mod);
+
+    const wasm_exe = b.addExecutable(.{
+        .name = "ozric_wasm",
+        .root_module = wasm_mod,
     });
 
     // WASM-specific flags (more restrictive than native)
@@ -293,71 +309,52 @@ pub fn build(b: *std.Build) void {
         "-DMINIGLOG",
         "-DCERES_RESTRICT_SCHUR_SPECIALIZATION",
         "-DCERES_NO_ACCELERATE_SPARSE",
-        "-DCERES_NO_CUSTOM_BLAS", // Disable custom BLAS
+        "-DCERES_NO_CUSTOM_BLAS",
         "-fno-exceptions", // Disable C++ exceptions for WASM
         "-fno-rtti", // Disable runtime type info for smaller binary
     };
 
     // Minimal Ceres sources for WASM (avoid all threading dependencies)
     const wasm_ceres_sources = [_][]const u8{
-        // Only the most essential utilities
         "stringprintf.cc",
         "wall_time.cc",
         "types.cc",
-
-        // Basic cost/loss functions only
         "cost_function.cc",
         "loss_function.cc",
-
-        // Math utilities
         "is_close.cc",
     };
 
-    // Add solver source
-    wasm_lib.addCSourceFiles(.{
+    // Add C++ sources directly to WASM executable
+    wasm_exe.addCSourceFiles(.{
         .root = b.path("src"),
         .files = &.{"solver.cc"},
+        .flags = wasm_ceres_flags,
     });
 
-    // Add minimal Ceres sources for WASM
-    wasm_lib.addCSourceFiles(.{
+    wasm_exe.addCSourceFiles(.{
         .root = ceres.path("internal/ceres"),
         .files = &wasm_ceres_sources,
         .flags = wasm_ceres_flags,
     });
 
-    // Add miniglog for WASM
-    wasm_lib.addCSourceFiles(.{
+    wasm_exe.addCSourceFiles(.{
         .root = ceres.path("internal/ceres/miniglog/glog"),
         .files = &.{"logging.cc"},
         .flags = wasm_ceres_flags,
     });
 
-    // Add include paths for WASM
-    wasm_lib.addIncludePath(ceres.path("include"));
-    wasm_lib.addIncludePath(ceres.path("."));
-    wasm_lib.addIncludePath(ceres.path("internal"));
-    wasm_lib.addIncludePath(ceres.path("config"));
-    wasm_lib.addIncludePath(ceres.path("internal/ceres/miniglog"));
-    wasm_lib.addIncludePath(eigen.path("."));
-    wasm_lib.addIncludePath(b.path("include"));
+    // Add include paths to WASM executable
+    wasm_exe.addIncludePath(ceres.path("include"));
+    wasm_exe.addIncludePath(ceres.path("."));
+    wasm_exe.addIncludePath(ceres.path("internal"));
+    wasm_exe.addIncludePath(ceres.path("config"));
+    wasm_exe.addIncludePath(ceres.path("internal/ceres/miniglog"));
+    wasm_exe.addIncludePath(eigen.path("."));
+    wasm_exe.addIncludePath(b.path("include"));
 
-    wasm_lib.linkLibCpp();
+    wasm_exe.linkLibC();
+    wasm_exe.linkLibCpp();
 
-    const wasm_mod = b.createModule(.{
-        .root_source_file = b.path("src/wasm.zig"),
-        .target = wasm_target,
-        .optimize = optimize,
-    });
-
-    wasm_mod.addImport("ozric_lib", wasm_lib_mod);
-
-    const wasm_exe = b.addExecutable(.{
-        .name = "ozric",
-        .root_module = wasm_mod,
-    });
-
-    b.installArtifact(wasm_lib);
     b.installArtifact(wasm_exe);
 
     const exe_mod = b.createModule(.{
