@@ -127,6 +127,7 @@
             packages = with pkgs; [
               nil
               treefmt
+              wasmtime
               zls
             ];
             shellHook = githooks.shellHook;
