@@ -53,7 +53,9 @@
           src = cleanSource ./.;
 
           # Packages required for compiling
-          nativeBuildInputs = with env.pkgs; [ ];
+          nativeBuildInputs = with env.pkgs; [
+            emscripten
+          ];
 
           # Packages required for linking
           buildInputs = with env.pkgs; [ ];
@@ -88,6 +90,11 @@
 
         # nix run .#build
         apps.build = env.app [ ] "zig build \"$@\"";
+
+        # nix run .#build-wasm
+        apps.build-wasm = env.app [
+          pkgs.emscripten
+        ] "zig build --sysroot ${pkgs.emscripten}/upstream/emscripten wasm-threads -- \"$@\"";
 
         # nix run .#test
         apps.test = env.app [ ] "zig build test -- \"$@\"";
@@ -125,6 +132,8 @@
 
             # Packages required for development
             packages = with pkgs; [
+              deno
+              nodejs
               nil
               treefmt
               wasmtime
