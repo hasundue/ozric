@@ -17,8 +17,8 @@ pub const ceres_flags = [_][]const u8{
     "-DCERES_NO_ACCELERATE_SPARSE", // Disable Accelerate sparse support
 };
 
-/// List of Ceres source files with required threading support
-pub const ceres_sources = [_][]const u8{
+/// Core Ceres source files in internal/ceres/
+const ceres_core_sources = [_][]const u8{
     // Core utilities
     "array_utils.cc",
     "stringprintf.cc",
@@ -179,37 +179,51 @@ pub const ceres_sources = [_][]const u8{
     "partitioned_matrix_view.cc",
 };
 
+/// Template specialization sources in internal/ceres/generated/
+const ceres_generated_sources = [_][]const u8{
+    // Template specializations (dynamic-sized only due to CERES_RESTRICT_SCHUR_SPECIALIZATION)
+    "schur_eliminator_d_d_d.cc",
+    "partitioned_matrix_view_d_d_d.cc",
+};
+
+/// Miniglog sources in internal/ceres/miniglog/glog/
+const miniglog_sources = [_][]const u8{
+    "logging.cc",
+};
+
+/// Comprehensive list of all Ceres source files with full paths
+pub const all_ceres_sources = blk: {
+    var sources: [ceres_core_sources.len + ceres_generated_sources.len + miniglog_sources.len][]const u8 = undefined;
+    var i: usize = 0;
+
+    // Add core sources with internal/ceres/ prefix
+    for (ceres_core_sources) |source| {
+        sources[i] = "internal/ceres/" ++ source;
+        i += 1;
+    }
+
+    // Add generated sources with internal/ceres/generated/ prefix
+    for (ceres_generated_sources) |source| {
+        sources[i] = "internal/ceres/generated/" ++ source;
+        i += 1;
+    }
+
+    // Add miniglog sources with internal/ceres/miniglog/glog/ prefix
+    for (miniglog_sources) |source| {
+        sources[i] = "internal/ceres/miniglog/glog/" ++ source;
+        i += 1;
+    }
+
+    break :blk sources;
+};
+
 /// Add Ceres-solver support to a library or executable
 pub fn addCeresSupport(b: *std.Build, artifact: *std.Build.Step.Compile, ceres: *std.Build.Dependency, eigen: *std.Build.Dependency) void {
-    // Add ceres source files
+    // Add all ceres source files (core, generated, and miniglog) with unified flags
     artifact.addCSourceFiles(.{
-        .root = ceres.path("internal/ceres"),
-        .files = &ceres_sources,
+        .root = ceres.path("."),
+        .files = &all_ceres_sources,
         .flags = &ceres_flags,
-    });
-
-    // Since we set CERES_RESTRICT_SCHUR_SPECIALIZATION, we only need to
-    // add the dynamic-sized Schur eliminator and partitioned matrix view
-    // template specializations.
-    artifact.addCSourceFiles(.{
-        .root = ceres.path("internal/ceres/generated"),
-        .files = &.{
-            "schur_eliminator_d_d_d.cc",
-            "partitioned_matrix_view_d_d_d.cc",
-        },
-        .flags = &ceres_flags,
-    });
-
-    // Add miniglog source file with proper export macros
-    artifact.addCSourceFiles(.{
-        .root = ceres.path("internal/ceres/miniglog/glog"),
-        .files = &.{"logging.cc"},
-        .flags = &.{
-            "-std=c++17",
-            "-DCERES_EXPORT=", // Define CERES_EXPORT as empty
-            "-DCERES_NO_EXPORT=", // Define CERES_NO_EXPORT as empty
-            "-DMINIGLOG", // Use minimal logging
-        },
     });
 
     // Add ceres include directories
@@ -234,45 +248,23 @@ pub const WasmSourceInfo = struct {
     base_dir: std.Build.LazyPath,
 };
 
-/// Get all source files for WASM compilation
-pub fn getWasmSources(b: *std.Build, ceres: *std.Build.Dependency, allocator: std.mem.Allocator) !std.ArrayList(WasmSourceInfo) {
-    var all_sources = std.ArrayList(WasmSourceInfo).init(allocator);
+/// Get all Ceres source files for WASM compilation
+pub fn getCeresSources(ceres: *std.Build.Dependency, allocator: std.mem.Allocator) !std.ArrayList(WasmSourceInfo) {
+    var sources = std.ArrayList(WasmSourceInfo).init(allocator);
 
-    // Add our C++ wrapper
-    try all_sources.append(.{
-        .path = "src/solver.cc",
-        .base_dir = b.path("."),
-    });
-
-    // Add ceres sources
-    for (ceres_sources) |source| {
-        try all_sources.append(.{
-            .path = b.fmt("internal/ceres/{s}", .{source}),
+    // Add all ceres sources (core, generated, and miniglog)
+    for (all_ceres_sources) |source| {
+        try sources.append(.{
+            .path = source,
             .base_dir = ceres.path("."),
         });
     }
 
-    // Add template specializations
-    try all_sources.append(.{
-        .path = "internal/ceres/generated/schur_eliminator_d_d_d.cc",
-        .base_dir = ceres.path("."),
-    });
-    try all_sources.append(.{
-        .path = "internal/ceres/generated/partitioned_matrix_view_d_d_d.cc",
-        .base_dir = ceres.path("."),
-    });
-
-    // Add miniglog
-    try all_sources.append(.{
-        .path = "internal/ceres/miniglog/glog/logging.cc",
-        .base_dir = ceres.path("."),
-    });
-
-    return all_sources;
+    return sources;
 }
 
-/// Common emcc compilation flags for WASM builds (reuses ceres_flags)
-pub const emcc_compile_flags = [_][]const u8{
+/// Compilation command for Emscripten C++ files with Ceres support
+pub const emcc_compile_command = [_][]const u8{
     "ccache",
     "emcc",
     "-c",

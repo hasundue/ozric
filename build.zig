@@ -85,14 +85,20 @@ pub fn build(b: *std.Build) void {
     const wasm_step = b.step("wasm", "Build WASM using Emscripten");
 
     // Get all source files for WASM compilation
-    const all_sources = ceres.getWasmSources(b, ceres_dep, b.allocator) catch @panic("OOM");
+    var all_sources = ceres.getCeresSources(ceres_dep, b.allocator) catch @panic("OOM");
+
+    // Add our project-specific C++ wrapper
+    all_sources.append(.{
+        .path = "src/solver.cc",
+        .base_dir = b.path("."),
+    }) catch @panic("OOM");
 
     // Compile each source file to object file
     var object_files = std.ArrayList([]const u8).init(b.allocator);
     var compile_steps = std.ArrayList(*std.Build.Step).init(b.allocator);
 
     for (all_sources.items) |source_info| {
-        const compile_cmd = b.addSystemCommand(&ceres.emcc_compile_flags);
+        const compile_cmd = b.addSystemCommand(&ceres.emcc_compile_command);
 
         // Set environment variables
         compile_cmd.setEnvironmentVariable("EMCC_DEBUG", "0");
@@ -109,12 +115,10 @@ pub fn build(b: *std.Build) void {
         // Output object file with directory structure to avoid collisions
         const source_basename = std.fs.path.basename(source_info.path);
         const base_name = source_basename[0 .. source_basename.len - 3]; // Remove .cc/.cpp extension
+        const dirname = std.fs.path.dirname(source_info.path) orelse "";
 
-        // Organize object files by source: ours in obj/src/, ceres in obj/ceres/
-        const object_path = if (std.mem.startsWith(u8, source_info.path, "src/"))
-            b.fmt("zig-out/obj/src/{s}.o", .{base_name})
-        else
-            b.fmt("zig-out/obj/ceres/{s}/{s}.o", .{ std.fs.path.dirname(source_info.path) orelse "", base_name });
+        // Create object file path preserving directory structure
+        const object_path = b.fmt("zig-out/obj/{s}/{s}.o", .{ dirname, base_name });
         compile_cmd.addArg("-o");
         compile_cmd.addArg(object_path);
 

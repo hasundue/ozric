@@ -139,6 +139,7 @@
 
             # Packages required for development
             packages = with pkgs; [
+              clangd
               deno
               nodejs
               nil
