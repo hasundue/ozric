@@ -94,10 +94,13 @@
         # nix run .#build-wasm
         apps.build-wasm = env.app [
           pkgs.emscripten
-        ] "zig build --sysroot ${pkgs.emscripten}/upstream/emscripten wasm-threads -- \"$@\"";
+        ] "zig build --sysroot ${pkgs.emscripten}/upstream/emscripten wasm -- \"$@\"";
 
         # nix run .#test
         apps.test = env.app [ ] "zig build test -- \"$@\"";
+
+        # nix run .#test-wasm
+        apps.test-wasm = env.app [ ] "node tests/test_wasm.js -- \"$@\"";
 
         # nix run .#docs
         apps.docs = env.app [ ] "zig build docs -- \"$@\"";

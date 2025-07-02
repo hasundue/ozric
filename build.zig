@@ -49,7 +49,7 @@ pub fn build(b: *std.Build) void {
     };
 
     // Add ceres source files with required threading support
-    const essential_ceres_sources = [_][]const u8{
+    const ceres_sources = [_][]const u8{
         // Core utilities
         "array_utils.cc",
         "stringprintf.cc",
@@ -212,7 +212,7 @@ pub fn build(b: *std.Build) void {
 
     lib.addCSourceFiles(.{
         .root = ceres.path("internal/ceres"),
-        .files = &essential_ceres_sources,
+        .files = &ceres_sources,
         .flags = ceres_flags,
     });
 
@@ -260,114 +260,6 @@ pub fn build(b: *std.Build) void {
 
     b.installArtifact(lib);
 
-    // Create WASM target with threading support (works with and without SharedArrayBuffer)
-    const wasm_target = b.resolveTargetQuery(.{
-        .cpu_arch = .wasm32,
-        .cpu_model = .{ .explicit = &std.Target.wasm.cpu.mvp },
-        .cpu_features_add = std.Target.wasm.featureSet(&.{
-            .atomics,
-            .bulk_memory,
-        }),
-        .os_tag = .emscripten,
-    });
-
-    const wasm_lib_mod = b.createModule(.{
-        .root_source_file = b.path("src/root.zig"),
-        .target = wasm_target,
-        .optimize = optimize,
-    });
-
-    // Add include paths to the WASM library module
-    wasm_lib_mod.addIncludePath(ceres.path("include"));
-    wasm_lib_mod.addIncludePath(ceres.path("."));
-    wasm_lib_mod.addIncludePath(ceres.path("internal"));
-    wasm_lib_mod.addIncludePath(ceres.path("config"));
-    wasm_lib_mod.addIncludePath(ceres.path("internal/ceres/miniglog"));
-    wasm_lib_mod.addIncludePath(eigen.path("."));
-    wasm_lib_mod.addIncludePath(b.path("include"));
-
-    const wasm_mod = b.createModule(.{
-        .root_source_file = b.path("src/wasm.zig"),
-        .target = wasm_target,
-        .optimize = optimize,
-    });
-
-    wasm_mod.addImport("ozric_lib", wasm_lib_mod);
-
-    const wasm_exe = b.addExecutable(.{
-        .name = "ozric_wasm",
-        .root_module = wasm_mod,
-    });
-
-    // Configure for Emscripten threading
-    wasm_exe.shared_memory = true;
-    wasm_exe.root_module.single_threaded = false;
-
-    // Full Ceres flags with Emscripten threading support
-    const wasm_ceres_flags = &.{
-        "-std=c++17",
-        "-DCERES_NO_SUITESPARSE",
-        "-DCERES_NO_CXSPARSE",
-        "-DCERES_EXPORT=",
-        "-DCERES_NO_EXPORT=",
-        "-DCERES_NO_PROTOCOL_BUFFERS",
-        // NOTE: Removed -DCERES_NO_THREADS to enable threading
-        "-DCERES_NO_CUDA",
-        "-DCERES_NO_LAPACK",
-        "-DCERES_METIS_VERSION=\"5.1.0\"",
-        "-DMINIGLOG",
-        "-DCERES_RESTRICT_SCHUR_SPECIALIZATION",
-        "-DCERES_NO_ACCELERATE_SPARSE",
-        "-pthread", // Enable pthread support
-        "-sASYNCIFY", // Emscripten asyncify for blocking calls
-        "-sPTHREAD_POOL_SIZE=4", // Pre-allocate 4 threads
-        "-sINITIAL_MEMORY=167772160", // 160MB initial memory
-        "-sUSE_OFFSET_CONVERTER", // Better allocator compatibility
-    };
-
-    // Use full essential_ceres_sources for complete Ceres functionality
-    wasm_exe.addCSourceFiles(.{
-        .root = b.path("src"),
-        .files = &.{"solver.cc"},
-        .flags = wasm_ceres_flags,
-    });
-
-    wasm_exe.addCSourceFiles(.{
-        .root = ceres.path("internal/ceres"),
-        .files = &essential_ceres_sources,
-        .flags = wasm_ceres_flags,
-    });
-
-    // Add template specializations for full functionality
-    wasm_exe.addCSourceFiles(.{
-        .root = ceres.path("internal/ceres/generated"),
-        .files = &.{
-            "schur_eliminator_d_d_d.cc",
-            "partitioned_matrix_view_d_d_d.cc",
-        },
-        .flags = wasm_ceres_flags,
-    });
-
-    wasm_exe.addCSourceFiles(.{
-        .root = ceres.path("internal/ceres/miniglog/glog"),
-        .files = &.{"logging.cc"},
-        .flags = wasm_ceres_flags,
-    });
-
-    // Add include paths to WASM executable
-    wasm_exe.addIncludePath(ceres.path("include"));
-    wasm_exe.addIncludePath(ceres.path("."));
-    wasm_exe.addIncludePath(ceres.path("internal"));
-    wasm_exe.addIncludePath(ceres.path("config"));
-    wasm_exe.addIncludePath(ceres.path("internal/ceres/miniglog"));
-    wasm_exe.addIncludePath(eigen.path("."));
-    wasm_exe.addIncludePath(b.path("include"));
-
-    wasm_exe.linkLibC();
-    wasm_exe.linkLibCpp();
-
-    b.installArtifact(wasm_exe);
-
     const exe_mod = b.createModule(.{
         .root_source_file = b.path("src/main.zig"),
         .target = target,
@@ -413,8 +305,7 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&run_lib_unit_tests.step);
     test_step.dependOn(&run_exe_unit_tests.step);
 
-    // Add dedicated WASM threading build step using Emscripten directly
-    const wasm_threads_step = b.step("wasm-threads", "Build WASM with threading support using Emscripten");
+    const wasm_step = b.step("wasm", "Build WASM using Emscripten");
 
     // Create Emscripten compilation command
     const emcc_cmd = b.addSystemCommand(&.{
@@ -426,8 +317,8 @@ pub fn build(b: *std.Build) void {
         "-sINITIAL_MEMORY=167772160", // 160MB
         "-sUSE_OFFSET_CONVERTER",
         "-sEXPORTED_FUNCTIONS=_test_ceres,_run_hello_world",
-        "-sEXPORTED_RUNTIME_METHODS=ccall,cwrap",
-        "-O0", // TODO: Make this configurable
+        "-sEXPORTED_RUNTIME_METHODS=ccall,cwrap,PThread",
+        "-O0",
         "--cache",
         ".zig-cache/emcc",
         // Ceres defines
@@ -458,7 +349,7 @@ pub fn build(b: *std.Build) void {
     emcc_cmd.addArg(b.fmt("{s}/src/solver.cc", .{b.build_root.path.?}));
 
     // Add all essential Ceres sources
-    for (essential_ceres_sources) |source| {
+    for (ceres_sources) |source| {
         emcc_cmd.addArg(b.fmt("{s}/internal/ceres/{s}", .{ ceres.path(".").getPath(b), source }));
     }
 
@@ -473,5 +364,5 @@ pub fn build(b: *std.Build) void {
     emcc_cmd.addArg("-o");
     emcc_cmd.addArg("zig-out/bin/ozric_wasm.js");
 
-    wasm_threads_step.dependOn(&emcc_cmd.step);
+    wasm_step.dependOn(&emcc_cmd.step);
 }
