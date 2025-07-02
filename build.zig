@@ -380,6 +380,11 @@ pub fn build(b: *std.Build) void {
         compile_cmd.setEnvironmentVariable("EMCC_DEBUG", "1");
         compile_cmd.setEnvironmentVariable("CCACHE_DIR", ".zig-cache/ccache");
 
+        // Allowlist absolute paths to suppress warnings
+        compile_cmd.addArg(b.fmt("--valid-abspath={s}", .{ceres.path(".").getPath(b)}));
+        compile_cmd.addArg(b.fmt("--valid-abspath={s}", .{eigen.path(".").getPath(b)}));
+        compile_cmd.addArg(b.fmt("--valid-abspath={s}", .{b.path("include").getPath(b)}));
+
         // Add include paths
         compile_cmd.addArg(b.fmt("-I{s}", .{ceres.path("include").getPath(b)}));
         compile_cmd.addArg(b.fmt("-I{s}", .{ceres.path(".").getPath(b)}));
