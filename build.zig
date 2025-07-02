@@ -377,8 +377,9 @@ pub fn build(b: *std.Build) void {
         const compile_cmd = b.addSystemCommand(&emcc_compile_flags);
 
         // Set environment variables
-        compile_cmd.setEnvironmentVariable("EMCC_DEBUG", "1");
+        compile_cmd.setEnvironmentVariable("EMCC_DEBUG", "0");
         compile_cmd.setEnvironmentVariable("CCACHE_DIR", ".zig-cache/ccache");
+        compile_cmd.setEnvironmentVariable("CCACHE_IGNOREOPTIONS", "-v -g* -W* --verbose");
 
         // Allowlist absolute paths to suppress warnings
         compile_cmd.addArg(b.fmt("--valid-abspath={s}", .{ceres.path(".").getPath(b)}));
@@ -429,8 +430,7 @@ pub fn build(b: *std.Build) void {
         ".zig-cache/emcc",
     });
 
-    link_cmd.setEnvironmentVariable("EMCC_DEBUG", "1");
-    link_cmd.setEnvironmentVariable("CCACHE_DIR", ".zig-cache/ccache");
+    link_cmd.setEnvironmentVariable("EMCC_DEBUG", "0");
 
     // Add all object files
     for (object_files.items) |obj_file| {
