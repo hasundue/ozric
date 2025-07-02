@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 // Test script for Ceres WASM with threading support
-const Module = require('../zig-out/bin/ozric_wasm_threads.js');
+const Module = require('../zig-out/bin/ozric_wasm.js');
 
 Module.onRuntimeInitialized = () => {
     console.log('✅ WASM runtime initialized!');
