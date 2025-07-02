@@ -104,7 +104,7 @@
         apps.test = env.app [ ] "zig build test -- \"$@\"";
 
         # nix run .#test-wasm
-        apps.test-wasm = env.app [ ] "node tests/test_wasm.js -- \"$@\"";
+        apps.test-wasm = env.app [ pkgs.nodejs ] "node tests/test_wasm.js -- \"$@\"";
 
         # nix run .#docs
         apps.docs = env.app [ ] "zig build docs -- \"$@\"";
@@ -139,7 +139,7 @@
 
             # Packages required for development
             packages = with pkgs; [
-              clangd
+              clang-tools
               deno
               nodejs
               nil

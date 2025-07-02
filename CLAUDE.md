@@ -54,6 +54,9 @@ zig build test
 
 # Generate documentation
 nix run .#docs
+
+# Build WASM (use Nix for proper environment)
+nix run .#build-wasm
 ```
 
 ### Build Targets and Structure
@@ -69,8 +72,9 @@ nix build          # Default Nix-friendly binaries
 nix build .#foreign # Musl-linked binaries for non-Nix distribution
 
 # Development and testing
-nix run .#build    # Build with arguments
-nix run .#test     # Run tests via Nix
+nix run .#build     # Build with arguments
+nix run .#test      # Run tests via Nix
+nix run .#build-wasm # Build WASM with proper Emscripten environment
 ```
 
 ## Architecture
