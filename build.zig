@@ -307,17 +307,13 @@ pub fn build(b: *std.Build) void {
 
     const wasm_step = b.step("wasm", "Build WASM using Emscripten");
 
-    // Create Emscripten compilation command
-    const emcc_cmd = b.addSystemCommand(&.{
+    // Common emcc flags
+    const emcc_compile_flags = [_][]const u8{
+        "ccache",
         "emcc",
         "-std=c++17",
+        "-c",
         "-pthread",
-        "-sASYNCIFY",
-        "-sPTHREAD_POOL_SIZE=4",
-        "-sINITIAL_MEMORY=167772160", // 160MB
-        "-sUSE_OFFSET_CONVERTER",
-        "-sEXPORTED_FUNCTIONS=_test_ceres,_run_hello_world",
-        "-sEXPORTED_RUNTIME_METHODS=ccall,cwrap,PThread",
         "-O0",
         "--cache",
         ".zig-cache/emcc",
@@ -333,36 +329,117 @@ pub fn build(b: *std.Build) void {
         "-DMINIGLOG",
         "-DCERES_RESTRICT_SCHUR_SPECIALIZATION",
         "-DCERES_NO_ACCELERATE_SPARSE",
-        // Include paths
-    });
+    };
 
-    // Add include paths
-    emcc_cmd.addArg(b.fmt("-I{s}", .{ceres.path("include").getPath(b)}));
-    emcc_cmd.addArg(b.fmt("-I{s}", .{ceres.path(".").getPath(b)}));
-    emcc_cmd.addArg(b.fmt("-I{s}", .{ceres.path("internal").getPath(b)}));
-    emcc_cmd.addArg(b.fmt("-I{s}", .{ceres.path("config").getPath(b)}));
-    emcc_cmd.addArg(b.fmt("-I{s}", .{ceres.path("internal/ceres/miniglog").getPath(b)}));
-    emcc_cmd.addArg(b.fmt("-I{s}", .{eigen.path(".").getPath(b)}));
-    emcc_cmd.addArg(b.fmt("-I{s}", .{b.path("include").getPath(b)}));
+    // All source files to compile
+    const SourceInfo = struct {
+        path: []const u8,
+        base_dir: std.Build.LazyPath,
+    };
+
+    var all_sources = std.ArrayList(SourceInfo).init(b.allocator);
 
     // Add our C++ wrapper
-    emcc_cmd.addArg(b.fmt("{s}/src/solver.cc", .{b.build_root.path.?}));
+    all_sources.append(.{
+        .path = "src/solver.cc",
+        .base_dir = b.path("."),
+    }) catch @panic("OOM");
 
-    // Add all essential Ceres sources
+    // Add ceres sources
     for (ceres_sources) |source| {
-        emcc_cmd.addArg(b.fmt("{s}/internal/ceres/{s}", .{ ceres.path(".").getPath(b), source }));
+        all_sources.append(.{
+            .path = b.fmt("internal/ceres/{s}", .{source}),
+            .base_dir = ceres.path("."),
+        }) catch @panic("OOM");
     }
 
     // Add template specializations
-    emcc_cmd.addArg(b.fmt("{s}/internal/ceres/generated/schur_eliminator_d_d_d.cc", .{ceres.path(".").getPath(b)}));
-    emcc_cmd.addArg(b.fmt("{s}/internal/ceres/generated/partitioned_matrix_view_d_d_d.cc", .{ceres.path(".").getPath(b)}));
+    all_sources.append(.{
+        .path = "internal/ceres/generated/schur_eliminator_d_d_d.cc",
+        .base_dir = ceres.path("."),
+    }) catch @panic("OOM");
+    all_sources.append(.{
+        .path = "internal/ceres/generated/partitioned_matrix_view_d_d_d.cc",
+        .base_dir = ceres.path("."),
+    }) catch @panic("OOM");
 
     // Add miniglog
-    emcc_cmd.addArg(b.fmt("{s}/internal/ceres/miniglog/glog/logging.cc", .{ceres.path(".").getPath(b)}));
+    all_sources.append(.{
+        .path = "internal/ceres/miniglog/glog/logging.cc",
+        .base_dir = ceres.path("."),
+    }) catch @panic("OOM");
+
+    // Compile each source file to object file
+    var object_files = std.ArrayList([]const u8).init(b.allocator);
+    var compile_steps = std.ArrayList(*std.Build.Step).init(b.allocator);
+
+    for (all_sources.items) |source_info| {
+        const compile_cmd = b.addSystemCommand(&emcc_compile_flags);
+
+        // Set environment variables
+        compile_cmd.setEnvironmentVariable("EMCC_DEBUG", "1");
+        compile_cmd.setEnvironmentVariable("CCACHE_DIR", ".zig-cache/ccache");
+
+        // Add include paths
+        compile_cmd.addArg(b.fmt("-I{s}", .{ceres.path("include").getPath(b)}));
+        compile_cmd.addArg(b.fmt("-I{s}", .{ceres.path(".").getPath(b)}));
+        compile_cmd.addArg(b.fmt("-I{s}", .{ceres.path("internal").getPath(b)}));
+        compile_cmd.addArg(b.fmt("-I{s}", .{ceres.path("config").getPath(b)}));
+        compile_cmd.addArg(b.fmt("-I{s}", .{ceres.path("internal/ceres/miniglog").getPath(b)}));
+        compile_cmd.addArg(b.fmt("-I{s}", .{eigen.path(".").getPath(b)}));
+        compile_cmd.addArg(b.fmt("-I{s}", .{b.path("include").getPath(b)}));
+
+        // Input source file
+        const source_path = b.fmt("{s}/{s}", .{ source_info.base_dir.getPath(b), source_info.path });
+        compile_cmd.addArg(source_path);
+
+        // Output object file with directory structure to avoid collisions
+        const source_basename = std.fs.path.basename(source_info.path);
+        const base_name = source_basename[0 .. source_basename.len - 3]; // Remove .cc/.cpp extension
+
+        // Organize object files by source: ours in obj/src/, ceres in obj/ceres/
+        const object_path = if (std.mem.startsWith(u8, source_info.path, "src/"))
+            b.fmt("zig-out/obj/src/{s}.o", .{base_name})
+        else
+            b.fmt("zig-out/obj/ceres/{s}/{s}.o", .{ std.fs.path.dirname(source_info.path) orelse "", base_name });
+        compile_cmd.addArg("-o");
+        compile_cmd.addArg(object_path);
+
+        object_files.append(object_path) catch @panic("OOM");
+        compile_steps.append(&compile_cmd.step) catch @panic("OOM");
+    }
+
+    // Final linking step
+    const link_cmd = b.addSystemCommand(&.{
+        "emcc",
+        "-pthread",
+        "-sASYNCIFY",
+        "-sPTHREAD_POOL_SIZE=4",
+        "-sINITIAL_MEMORY=167772160", // 160MB
+        "-sUSE_OFFSET_CONVERTER",
+        "-sEXPORTED_FUNCTIONS=['_test_ceres','_run_hello_world']",
+        "-sEXPORTED_RUNTIME_METHODS=ccall,cwrap,PThread",
+        "-O0",
+        "--cache",
+        ".zig-cache/emcc",
+    });
+
+    link_cmd.setEnvironmentVariable("EMCC_DEBUG", "1");
+    link_cmd.setEnvironmentVariable("CCACHE_DIR", ".zig-cache/ccache");
+
+    // Add all object files
+    for (object_files.items) |obj_file| {
+        link_cmd.addArg(obj_file);
+    }
 
     // Output file
-    emcc_cmd.addArg("-o");
-    emcc_cmd.addArg("zig-out/bin/ozric_wasm.js");
+    link_cmd.addArg("-o");
+    link_cmd.addArg("zig-out/bin/ozric_wasm.js");
 
-    wasm_step.dependOn(&emcc_cmd.step);
+    // Make link_cmd depend on all compile steps
+    for (compile_steps.items) |compile_step| {
+        link_cmd.step.dependOn(compile_step);
+    }
+
+    wasm_step.dependOn(&link_cmd.step);
 }

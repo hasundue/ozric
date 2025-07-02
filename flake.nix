@@ -54,6 +54,7 @@
 
           # Packages required for compiling
           nativeBuildInputs = with env.pkgs; [
+            ccache
             emscripten
           ];
 
@@ -92,9 +93,12 @@
         apps.build = env.app [ ] "zig build \"$@\"";
 
         # nix run .#build-wasm
-        apps.build-wasm = env.app [
-          pkgs.emscripten
-        ] "zig build --sysroot ${pkgs.emscripten}/upstream/emscripten wasm -- \"$@\"";
+        apps.build-wasm =
+          with pkgs;
+          env.app [
+            ccache
+            emscripten
+          ] "zig build --sysroot ${pkgs.emscripten}/upstream/emscripten wasm -- \"$@\"";
 
         # nix run .#test
         apps.test = env.app [ ] "zig build test -- \"$@\"";
