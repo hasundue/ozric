@@ -1,5 +1,5 @@
 // Test including ceres headers (now uses our macro-fixed version)
-#include "ceres.h"
+#include <ceres.h>
 #include <cmath>
 
 // Simple function that uses ceres header

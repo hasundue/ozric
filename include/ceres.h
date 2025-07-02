@@ -26,9 +26,9 @@
 // Use standard implementations since they should work in WASM context
 #endif // __wasm__
 
-// Include ceres headers
-#include "ceres/version.h"
-#include "ceres/ceres.h"
+// Include ceres headers using angle brackets for external library
+#include <ceres/version.h>
+#include <ceres/ceres.h>
 
 // Restore original definitions
 #pragma pop_macro("CERES_NO_EXPORT")

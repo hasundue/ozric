@@ -10,14 +10,9 @@ CompileFlags:
     - -w
 
 Diagnostics:
-  # Disable include diagnostics since we have a custom wrapper
-  UnusedIncludes: None
+  # Enable proper include diagnostics
+  UnusedIncludes: Strict
   MissingIncludes: None
-  # Suppress clang-tidy checks that might complain about include style
-  ClangTidy:
-    Remove: 
-      - misc-include-cleaner
-      - readability-redundant-preprocessor
 
 Index:
   # Skip indexing build artifacts
