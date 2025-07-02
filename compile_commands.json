@@ -1,0 +1,7 @@
+[
+  {
+    "directory": "/home/hasundue/ozric",
+    "command": "clang++ -std=c++17 -DCERES_NO_SUITESPARSE -DCERES_NO_CXSPARSE -DCERES_EXPORT= -DCERES_NO_EXPORT= -DCERES_NO_PROTOCOL_BUFFERS -DCERES_NO_THREADS -DCERES_NO_CUDA -DCERES_NO_LAPACK -DCERES_METIS_VERSION=\"5.1.0\" -DMINIGLOG -DCERES_RESTRICT_SCHUR_SPECIALIZATION -DCERES_NO_ACCELERATE_SPARSE -I/home/hasundue/ozric/include -I/home/hasundue/.cache/zig/p/N-V-__8AAAwZyQAma1OByLx2AKj3upoY7FxoS7bQ1LBLR2m3/include -I/home/hasundue/.cache/zig/p/N-V-__8AAAwZyQAma1OByLx2AKj3upoY7FxoS7bQ1LBLR2m3 -I/home/hasundue/.cache/zig/p/N-V-__8AAAwZyQAma1OByLx2AKj3upoY7FxoS7bQ1LBLR2m3/internal -I/home/hasundue/.cache/zig/p/N-V-__8AAAwZyQAma1OByLx2AKj3upoY7FxoS7bQ1LBLR2m3/config -I/home/hasundue/.cache/zig/p/N-V-__8AAAwZyQAma1OByLx2AKj3upoY7FxoS7bQ1LBLR2m3/internal/ceres/miniglog -I/home/hasundue/.cache/zig/p/N-V-__8AABPI6wAbBLaww8cKO-HchZ0ft-BxUOEOyQtTSccD -c src/solver.cc",
+    "file": "src/solver.cc"
+  }
+]
