@@ -1,5 +1,304 @@
 const std = @import("std");
 
+/// Compilation flags for Ceres solver with MINIGLOG for 2.2.0
+pub const ceres_flags = [_][]const u8{
+    "-std=c++17",
+    "-DCERES_NO_SUITESPARSE",
+    "-DCERES_NO_CXSPARSE",
+    "-DCERES_EXPORT=", // Define CERES_EXPORT as empty
+    "-DCERES_NO_EXPORT=", // Define CERES_NO_EXPORT as empty
+    "-DCERES_NO_PROTOCOL_BUFFERS",
+    "-DCERES_NO_THREADS",
+    "-DCERES_NO_CUDA", // Disable CUDA support
+    "-DCERES_NO_LAPACK", // Disable LAPACK dependencies
+    "-DCERES_METIS_VERSION=\"5.1.0\"", // Define METIS version
+    "-DMINIGLOG", // Use minimal logging instead of full glog
+    "-DCERES_RESTRICT_SCHUR_SPECIALIZATION", // Restrict Schur specializations
+    "-DCERES_NO_ACCELERATE_SPARSE", // Disable Accelerate sparse support
+};
+
+/// List of Ceres source files with required threading support
+pub const ceres_sources = [_][]const u8{
+    // Core utilities
+    "array_utils.cc",
+    "stringprintf.cc",
+    "wall_time.cc",
+
+    // Problem core
+    "problem.cc",
+    "problem_impl.cc",
+    "cost_function.cc",
+    "loss_function.cc",
+    "corrector.cc",
+    "residual_block.cc",
+
+    // Solver core and utilities
+    "solver.cc",
+    "minimizer.cc",
+    "trust_region_minimizer.cc",
+    "trust_region_strategy.cc",
+    "levenberg_marquardt_strategy.cc",
+    "types.cc",
+
+    // Basic linear solver (QR only)
+    "linear_solver.cc",
+    "dense_qr_solver.cc",
+    "dense_qr.cc",
+
+    // Program structure and utilities
+    "program.cc",
+    "preprocessor.cc",
+    "manifold.cc",
+    "detect_structure.cc",
+
+    // Evaluation basics
+    "evaluator.cc",
+    "block_evaluate_preparer.cc",
+    "block_jacobian_writer.cc",
+    "compressed_row_jacobian_writer.cc",
+    "block_sparse_matrix.cc",
+    "compressed_row_sparse_matrix.cc",
+    "triplet_sparse_matrix.cc",
+
+    // Threading support (required)
+    "thread_pool.cc",
+
+    // Sparse matrix base class and linear operators
+    "sparse_matrix.cc",
+    "linear_operator.cc",
+
+    // Mathematical utilities
+    "gradient_checker.cc",
+    "is_close.cc",
+
+    // Dense matrix support
+    "dense_sparse_matrix.cc",
+
+    // Parallel operations
+    "parallel_vector_ops.cc",
+    "parallel_invoke.cc",
+    "parallel_utils.cc",
+
+    // Solver utilities and templates
+    "solver_utils.cc",
+    "schur_templates.cc",
+
+    // Block structure and jacobian support
+    "block_structure.cc",
+    "scratch_evaluate_preparer.cc",
+    "dynamic_compressed_row_jacobian_writer.cc",
+
+    // Parameter ordering and preprocessing
+    "parameter_block_ordering.cc",
+    "trust_region_preprocessor.cc",
+    "reorder_program.cc",
+    "coordinate_descent_minimizer.cc",
+
+    // Callback support
+    "iteration_callback.cc",
+    "gradient_problem_solver.cc",
+    "callbacks.cc",
+    "evaluation_callback.cc",
+
+    // Gradient problem support
+    "gradient_problem.cc",
+
+    // Linear least squares support
+    "linear_least_squares_problems.cc",
+
+    // Dense matrix linear algebra
+    "dense_cholesky.cc",
+    "dense_normal_cholesky_solver.cc",
+
+    // Sparse matrix operations
+    "dynamic_compressed_row_sparse_matrix.cc",
+    "sparse_cholesky.cc",
+
+    // Preconditioner systems
+    "preconditioner.cc",
+    "block_jacobi_preconditioner.cc",
+    "subset_preconditioner.cc",
+    "schur_jacobi_preconditioner.cc",
+    "power_series_expansion_preconditioner.cc",
+
+    // Additional linear solvers
+    "cgnr_solver.cc",
+    "iterative_schur_complement_solver.cc",
+    "sparse_normal_cholesky_solver.cc",
+    "dynamic_sparse_normal_cholesky_solver.cc",
+
+    // Line search and optimization
+    "line_search.cc",
+    "line_search_direction.cc",
+    "line_search_minimizer.cc",
+    "line_search_preprocessor.cc",
+
+    // Advanced mathematics
+    "polynomial.cc",
+    "function_sample.cc",
+    "trust_region_step_evaluator.cc",
+    "low_rank_inverse_hessian.cc",
+
+    // Schur complement methods
+    "schur_eliminator.cc",
+    "implicit_schur_complement.cc",
+
+    // Block matrix operations
+    "block_random_access_diagonal_matrix.cc",
+    "block_random_access_sparse_matrix.cc",
+    "block_random_access_dense_matrix.cc",
+
+    // Computational utilities
+    "inner_product_computer.cc",
+    "iterative_refiner.cc",
+    "compressed_col_sparse_matrix_utils.cc",
+    "residual_block_utils.cc",
+
+    // File I/O operations
+    "file.cc",
+
+    // Gradient checking support
+    "gradient_checking_cost_function.cc",
+
+    // Context
+    "context.cc",
+    "context_impl.cc",
+
+    // Additional algorithm implementations
+    "dogleg_strategy.cc",
+    "schur_complement_solver.cc",
+    "visibility_based_preconditioner.cc",
+
+    // Visibility and clustering algorithms
+    "visibility.cc",
+    "canonical_views_clustering.cc",
+    "single_linkage_clustering.cc",
+    "block_random_access_matrix.cc",
+
+    // Template specialization base classes
+    "partitioned_matrix_view.cc",
+};
+
+/// Add Ceres-solver support to a library or executable
+pub fn addCeresSupport(b: *std.Build, artifact: *std.Build.Step.Compile, ceres: *std.Build.Dependency, eigen: *std.Build.Dependency) void {
+    // Add ceres source files
+    artifact.addCSourceFiles(.{
+        .root = ceres.path("internal/ceres"),
+        .files = &ceres_sources,
+        .flags = &ceres_flags,
+    });
+
+    // Since we set CERES_RESTRICT_SCHUR_SPECIALIZATION, we only need to
+    // add the dynamic-sized Schur eliminator and partitioned matrix view
+    // template specializations.
+    artifact.addCSourceFiles(.{
+        .root = ceres.path("internal/ceres/generated"),
+        .files = &.{
+            "schur_eliminator_d_d_d.cc",
+            "partitioned_matrix_view_d_d_d.cc",
+        },
+        .flags = &ceres_flags,
+    });
+
+    // Add miniglog source file with proper export macros
+    artifact.addCSourceFiles(.{
+        .root = ceres.path("internal/ceres/miniglog/glog"),
+        .files = &.{"logging.cc"},
+        .flags = &.{
+            "-std=c++17",
+            "-DCERES_EXPORT=", // Define CERES_EXPORT as empty
+            "-DCERES_NO_EXPORT=", // Define CERES_NO_EXPORT as empty
+            "-DMINIGLOG", // Use minimal logging
+        },
+    });
+
+    // Add ceres include directories
+    artifact.addIncludePath(ceres.path("include"));
+    artifact.addIncludePath(ceres.path(".")); // For internal headers
+    artifact.addIncludePath(ceres.path("internal")); // For internal ceres headers
+    artifact.addIncludePath(ceres.path("config")); // For config headers like export.h
+    artifact.addIncludePath(ceres.path("internal/ceres/miniglog")); // For miniglog headers
+
+    // Add Eigen include directory
+    artifact.addIncludePath(eigen.path(".")); // Eigen is header-only
+
+    // Add our local include directory
+    artifact.addIncludePath(b.path("include"));
+
+    // Link C++ standard library
+    artifact.linkLibCpp();
+}
+
+pub const WasmSourceInfo = struct {
+    path: []const u8,
+    base_dir: std.Build.LazyPath,
+};
+
+/// Get all source files for WASM compilation
+pub fn getWasmSources(b: *std.Build, ceres: *std.Build.Dependency, allocator: std.mem.Allocator) !std.ArrayList(WasmSourceInfo) {
+    var all_sources = std.ArrayList(WasmSourceInfo).init(allocator);
+
+    // Add our C++ wrapper
+    try all_sources.append(.{
+        .path = "src/solver.cc",
+        .base_dir = b.path("."),
+    });
+
+    // Add ceres sources
+    for (ceres_sources) |source| {
+        try all_sources.append(.{
+            .path = b.fmt("internal/ceres/{s}", .{source}),
+            .base_dir = ceres.path("."),
+        });
+    }
+
+    // Add template specializations
+    try all_sources.append(.{
+        .path = "internal/ceres/generated/schur_eliminator_d_d_d.cc",
+        .base_dir = ceres.path("."),
+    });
+    try all_sources.append(.{
+        .path = "internal/ceres/generated/partitioned_matrix_view_d_d_d.cc",
+        .base_dir = ceres.path("."),
+    });
+
+    // Add miniglog
+    try all_sources.append(.{
+        .path = "internal/ceres/miniglog/glog/logging.cc",
+        .base_dir = ceres.path("."),
+    });
+
+    return all_sources;
+}
+
+/// Common emcc compilation flags for WASM builds (reuses ceres_flags)
+pub const emcc_compile_flags = [_][]const u8{
+    "ccache",
+    "emcc",
+    "-c",
+    "-pthread",
+    "-O0",
+    "--cache",
+    ".zig-cache/emcc",
+} ++ ceres_flags;
+
+/// Add emcc include paths to a system command
+pub fn addEmccIncludePaths(compile_cmd: *std.Build.Step.Run, b: *std.Build, ceres: *std.Build.Dependency, eigen: *std.Build.Dependency) void {
+    // Allowlist absolute paths to suppress warnings
+    compile_cmd.addArg(b.fmt("--valid-abspath={s}", .{ceres.path(".").getPath(b)}));
+    compile_cmd.addArg(b.fmt("--valid-abspath={s}", .{eigen.path(".").getPath(b)}));
+    compile_cmd.addArg(b.fmt("--valid-abspath={s}", .{b.path("include").getPath(b)}));
+
+    // Add include paths
+    compile_cmd.addArg(b.fmt("-I{s}", .{ceres.path("include").getPath(b)}));
+    compile_cmd.addArg(b.fmt("-I{s}", .{ceres.path(".").getPath(b)}));
+    compile_cmd.addArg(b.fmt("-I{s}", .{ceres.path("internal").getPath(b)}));
+    compile_cmd.addArg(b.fmt("-I{s}", .{ceres.path("config").getPath(b)}));
+    compile_cmd.addArg(b.fmt("-I{s}", .{ceres.path("internal/ceres/miniglog").getPath(b)}));
+    compile_cmd.addArg(b.fmt("-I{s}", .{eigen.path(".").getPath(b)}));
+    compile_cmd.addArg(b.fmt("-I{s}", .{b.path("include").getPath(b)}));
+}
+
 /// Programmatically generates the list of Ceres template specialization source files.
 ///
 /// This function creates filenames for the generated template specializations that
