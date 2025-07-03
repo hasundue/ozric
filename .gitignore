@@ -17,3 +17,4 @@ zig-out/
 /docgen_tmp/
 .cache/clangd/index
 compile_commands.json
+completions/zig.fish

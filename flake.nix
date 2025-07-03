@@ -148,9 +148,16 @@
             shellHook =
               githooks.shellHook
               + ''
-                # Generate compile_commands.json for clangd
+                # Generate development files
                 echo "Generating compile_commands.json for clangd..."
                 zig build compile-commands 2>/dev/null || echo "Warning: Failed to generate compile_commands.json. Dependencies may not be available yet."
+                echo "Generating fish shell completions..."
+                zig build fish-completions 2>/dev/null || echo "Warning: Failed to generate fish completions."
+
+                # Fish shell completion available
+                if command -v fish >/dev/null 2>&1 && test -f completions/zig.fish; then
+                  echo "💡 Fish users: 'source completions/zig.fish' for custom zig build completions"
+                fi
               '';
           };
       }

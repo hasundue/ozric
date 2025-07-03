@@ -223,4 +223,51 @@ pub fn build(b: *std.Build) void {
 
         compile_commands_step.dependOn(&install_compile_commands.step);
     }
+
+    // Fish completions step
+    {
+        const fish_completions_step = b.step("fish-completions", "Generate fish shell completions");
+
+        const gen_fish_completions = b.addWriteFiles();
+
+        // Generate fish completion content dynamically from build steps
+        var fish_content = std.ArrayList(u8).init(b.allocator);
+        const writer = fish_content.writer();
+
+        // Header
+        writer.print(
+            \\# Ozric project-specific Zig build completions
+            \\# Generated automatically by 'zig build fish-completions'
+            \\# 
+            \\# To use: source completions/zig.fish
+            \\
+            \\# Add our custom build steps (supplements built-in fish zig completions)
+            \\
+        , .{}) catch @panic("OOM");
+
+        // Add completions for all registered build steps
+        var step_iterator = b.top_level_steps.iterator();
+        while (step_iterator.next()) |entry| {
+            const step_name = entry.key_ptr.*;
+            const step_info = entry.value_ptr.*;
+
+            // Skip standard steps that fish already knows about
+            if (std.mem.eql(u8, step_name, "install") or
+                std.mem.eql(u8, step_name, "uninstall") or
+                std.mem.eql(u8, step_name, "run") or
+                std.mem.eql(u8, step_name, "test"))
+            {
+                continue;
+            }
+
+            // Add completion for this step
+            writer.print("complete -c zig -n '__fish_seen_subcommand_from build' -f -a '{s}' -d '{s}'\n", .{ step_name, step_info.description }) catch @panic("OOM");
+        }
+
+        const fish_file = gen_fish_completions.add("zig.fish", fish_content.items);
+
+        const install_fish_completions = b.addInstallFile(fish_file, "../completions/zig.fish");
+
+        fish_completions_step.dependOn(&install_fish_completions.step);
+    }
 }
