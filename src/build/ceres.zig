@@ -217,6 +217,35 @@ pub const all_ceres_sources = blk: {
     break :blk sources;
 };
 
+/// Get the ordered list of include paths as LazyPath objects
+fn getCeresIncludePathObjects(b: *std.Build, ceres: *std.Build.Dependency, eigen: *std.Build.Dependency) [7]std.Build.LazyPath {
+    return [_]std.Build.LazyPath{
+        b.path("include"), // Project include
+        ceres.path("include"), // Ceres public headers
+        ceres.path("."), // Ceres internal headers
+        ceres.path("internal"), // Ceres internal directory
+        ceres.path("config"), // Ceres config headers
+        ceres.path("internal/ceres/miniglog"), // Miniglog headers
+        eigen.path("."), // Eigen headers (header-only)
+    };
+}
+
+/// Add include paths to any writer (for compile_commands.json generation)
+pub fn addIncludePathsToWriter(writer: anytype, b: *std.Build, ceres: *std.Build.Dependency, eigen: *std.Build.Dependency) !void {
+    const paths = getCeresIncludePathObjects(b, ceres, eigen);
+    for (paths) |path| {
+        try writer.print(" -I{s}", .{path.getPath(b)});
+    }
+}
+
+/// Add include paths to an artifact using the standard method
+pub fn addCeresIncludePaths(b: *std.Build, artifact: *std.Build.Step.Compile, ceres: *std.Build.Dependency, eigen: *std.Build.Dependency) void {
+    const paths = getCeresIncludePathObjects(b, ceres, eigen);
+    for (paths) |path| {
+        artifact.addIncludePath(path);
+    }
+}
+
 /// Add Ceres-solver support to a library or executable
 pub fn addCeresSupport(b: *std.Build, artifact: *std.Build.Step.Compile, ceres: *std.Build.Dependency, eigen: *std.Build.Dependency) void {
     // Add all ceres source files (core, generated, and miniglog) with unified flags
@@ -226,18 +255,8 @@ pub fn addCeresSupport(b: *std.Build, artifact: *std.Build.Step.Compile, ceres: 
         .flags = &ceres_flags,
     });
 
-    // Add ceres include directories
-    artifact.addIncludePath(ceres.path("include"));
-    artifact.addIncludePath(ceres.path(".")); // For internal headers
-    artifact.addIncludePath(ceres.path("internal")); // For internal ceres headers
-    artifact.addIncludePath(ceres.path("config")); // For config headers like export.h
-    artifact.addIncludePath(ceres.path("internal/ceres/miniglog")); // For miniglog headers
-
-    // Add Eigen include directory
-    artifact.addIncludePath(eigen.path(".")); // Eigen is header-only
-
-    // Add our local include directory
-    artifact.addIncludePath(b.path("include"));
+    // Add include paths
+    addCeresIncludePaths(b, artifact, ceres, eigen);
 
     // Link C++ standard library
     artifact.linkLibCpp();
@@ -276,19 +295,17 @@ pub const emcc_compile_command = [_][]const u8{
 
 /// Add emcc include paths to a system command
 pub fn addEmccIncludePaths(compile_cmd: *std.Build.Step.Run, b: *std.Build, ceres: *std.Build.Dependency, eigen: *std.Build.Dependency) void {
+    const paths = getCeresIncludePathObjects(b, ceres, eigen);
+
     // Allowlist absolute paths to suppress warnings
     compile_cmd.addArg(b.fmt("--valid-abspath={s}", .{ceres.path(".").getPath(b)}));
     compile_cmd.addArg(b.fmt("--valid-abspath={s}", .{eigen.path(".").getPath(b)}));
     compile_cmd.addArg(b.fmt("--valid-abspath={s}", .{b.path("include").getPath(b)}));
 
-    // Add include paths
-    compile_cmd.addArg(b.fmt("-I{s}", .{ceres.path("include").getPath(b)}));
-    compile_cmd.addArg(b.fmt("-I{s}", .{ceres.path(".").getPath(b)}));
-    compile_cmd.addArg(b.fmt("-I{s}", .{ceres.path("internal").getPath(b)}));
-    compile_cmd.addArg(b.fmt("-I{s}", .{ceres.path("config").getPath(b)}));
-    compile_cmd.addArg(b.fmt("-I{s}", .{ceres.path("internal/ceres/miniglog").getPath(b)}));
-    compile_cmd.addArg(b.fmt("-I{s}", .{eigen.path(".").getPath(b)}));
-    compile_cmd.addArg(b.fmt("-I{s}", .{b.path("include").getPath(b)}));
+    // Add include paths using the same order as other functions
+    for (paths) |path| {
+        compile_cmd.addArg(b.fmt("-I{s}", .{path.getPath(b)}));
+    }
 }
 
 /// Programmatically generates the list of Ceres template specialization source files.

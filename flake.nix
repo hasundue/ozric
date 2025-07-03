@@ -33,11 +33,7 @@
       system:
       let
         pkgs = nixpkgs.legacyPackages.${system};
-
-        lib = nixpkgs.lib // {
-          githooks-nix = githooks-nix.lib;
-          treefmt-nix = treefmt-nix.lib;
-        };
+        lib = nixpkgs.lib;
 
         # Zig flake helper
         # Check the flake.nix in zig2nix project for more options:
@@ -115,17 +111,18 @@
         # nix develop
         devShells.default =
           let
-            treefmt = lib.treefmt-nix.mkWrapper pkgs {
+            treefmt = treefmt-nix.lib.mkWrapper pkgs {
               programs.nixfmt.enable = true;
               programs.zig.enable = true;
             };
-            githooks = lib.githooks-nix.${system}.run {
+            githooks = githooks-nix.lib.${system}.run {
               src = ./.;
               hooks.treefmt = {
                 enable = true;
                 package = treefmt;
               };
             };
+
           in
           env.mkShell {
             # Packages required for compiling, linking and running
@@ -148,7 +145,13 @@
               wasmtime
               zls
             ];
-            shellHook = githooks.shellHook;
+            shellHook =
+              githooks.shellHook
+              + ''
+                # Generate compile_commands.json for clangd
+                echo "Generating compile_commands.json for clangd..."
+                zig build compile-commands 2>/dev/null || echo "Warning: Failed to generate compile_commands.json. Dependencies may not be available yet."
+              '';
           };
       }
     );

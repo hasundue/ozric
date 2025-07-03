@@ -171,4 +171,56 @@ pub fn build(b: *std.Build) void {
 
         wasm_step.dependOn(&link_cmd.step);
     }
+
+    // Compile commands step
+    {
+        const compile_commands_step = b.step("compile-commands", "Generate compile_commands.json for clangd");
+
+        const gen_compile_commands = b.addWriteFiles();
+
+        // Build the compile command using the same flags and includes as the actual build
+        var compile_command = std.ArrayList(u8).init(b.allocator);
+        const writer = compile_command.writer();
+
+        // Start with clang++
+        writer.print("clang++", .{}) catch @panic("OOM");
+
+        // Add all ceres flags
+        for (ceres.ceres_flags) |flag| {
+            writer.print(" {s}", .{flag}) catch @panic("OOM");
+        }
+
+        // Add include paths using the same function as addCeresSupport
+        ceres.addIncludePathsToWriter(writer, b, ceres_dep, eigen) catch @panic("OOM");
+        writer.print(" -c src/solver.cc", .{}) catch @panic("OOM");
+
+        // Generate the JSON content with proper escaping
+        // Need to escape quotes in the command string for valid JSON
+        var escaped_command = std.ArrayList(u8).init(b.allocator);
+        const escape_writer = escaped_command.writer();
+        for (compile_command.items) |char| {
+            if (char == '"') {
+                escape_writer.print("\\\"", .{}) catch @panic("OOM");
+            } else {
+                escape_writer.print("{c}", .{char}) catch @panic("OOM");
+            }
+        }
+
+        const json_content = b.fmt(
+            \\[
+            \\  {{
+            \\    "directory": "{s}",
+            \\    "command": "{s}",
+            \\    "file": "src/solver.cc"
+            \\  }}
+            \\]
+            \\
+        , .{ b.path("").getPath(b), escaped_command.items });
+
+        const compile_commands_file = gen_compile_commands.add("compile_commands.json", json_content);
+
+        const install_compile_commands = b.addInstallFile(compile_commands_file, "../compile_commands.json");
+
+        compile_commands_step.dependOn(&install_compile_commands.step);
+    }
 }
