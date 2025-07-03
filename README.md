@@ -42,6 +42,30 @@ zig build test
 - **Build system**: zig2nix for cross-platform Nix integration
 - **Development**: Automated formatting, pre-commit hooks, comprehensive testing
 
+## Development Tools
+
+### IDE Support
+
+**C++ Language Server (clangd)**:
+- Automatically generates `compile_commands.json` when entering the development environment
+- Provides full IDE features for C++ code including autocomplete, error checking, and go-to-definition
+
+**Fish Shell Completions**:
+- Automatically generates shell completions for custom `zig build` steps
+- To use: `source completions/zig.fish` in fish shell
+- Available completions: `compile-commands`, `wasm`, `fish-completions`
+
+### Available Build Steps
+
+```bash
+zig build                    # Default build
+zig build run               # Run the application
+zig build test              # Run tests
+zig build wasm              # Build WebAssembly version
+zig build compile-commands  # Generate clangd compilation database
+zig build fish-completions  # Generate fish shell completions
+```
+
 ## Status
 
 Foundation implemented - ready for ceres-solver integration and OZ equation system development.
