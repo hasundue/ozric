@@ -156,33 +156,19 @@ pub fn build(b: *std.Build) void {
         ceres.addIncludePathsToWriter(writer, b, ceres_dep, eigen) catch @panic("OOM");
         writer.print(" -c src/solver.cc", .{}) catch @panic("OOM");
 
-        // Generate the JSON content with proper escaping
-        // Need to escape quotes in the command string for valid JSON
-        var escaped_command = std.ArrayList(u8).init(b.allocator);
-        const escape_writer = escaped_command.writer();
-        for (compile_command.items) |char| {
-            if (char == '"') {
-                escape_writer.print("\\\"", .{}) catch @panic("OOM");
-            } else {
-                escape_writer.print("{c}", .{char}) catch @panic("OOM");
-            }
-        }
+        // Serialize to JSON using std.json
+        var json_content = std.ArrayList(u8).init(b.allocator);
+        const json_writer = json_content.writer();
+        std.json.stringify(.{
+            .{
+                .directory = b.path("").getPath(b),
+                .command = compile_command.items,
+                .file = "src/solver.cc",
+            },
+        }, .{}, json_writer) catch @panic("JSON serialization failed");
 
-        const json_content = b.fmt(
-            \\[
-            \\  {{
-            \\    "directory": "{s}",
-            \\    "command": "{s}",
-            \\    "file": "src/solver.cc"
-            \\  }}
-            \\]
-            \\
-        , .{ b.path("").getPath(b), escaped_command.items });
-
-        const compile_commands_file = gen_compile_commands.add("compile_commands.json", json_content);
-
+        const compile_commands_file = gen_compile_commands.add("compile_commands.json", json_content.items);
         const install_compile_commands = b.addInstallFile(compile_commands_file, "../compile_commands.json");
-
         compile_commands_step.dependOn(&install_compile_commands.step);
     }
 
