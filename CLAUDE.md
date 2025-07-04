@@ -15,12 +15,12 @@ Ozric is an Ornstein-Zernike (OZ) equation solver that leverages ceres-solver fo
 This project uses Nix flakes for reproducible development environments:
 
 ```bash
-# Enter development shell (includes ZLS, treefmt, nil)
+# Enter development shell (includes ZLS, clangd, treefmt)
 nix develop
 
-# Build and run the project
+# Build the library
 nix build
-nix run .
+nix build .#foreign  # Musl-linked binaries for non-Nix distribution
 
 # Format code
 treefmt
@@ -40,20 +40,20 @@ The repository uses direnv with two flakes:
 ## Build System
 
 ### Zig Build Configuration
-The project uses Zig's native build system with dual-module architecture:
+The project uses Zig's native build system as a **library-only** project:
 
 ```bash
-# Build the project
+# Build the library
 zig build
 
-# Run the executable
-zig build run
-
-# Run all tests (library + executable)
+# Run all tests (includes former main() functionality as test)
 zig build test
 
-# Generate documentation
-nix run .#docs
+# Generate compile_commands.json for clangd
+zig build compile-commands
+
+# Generate fish shell completions
+zig build fish-completions
 
 # Build WASM (use Nix for proper environment)
 nix run .#build-wasm
@@ -61,9 +61,10 @@ nix run .#build-wasm
 
 ### Build Targets and Structure
 - **Library module**: `src/root.zig` - Core functionality with exported functions
-- **Executable module**: `src/main.zig` - Application entry point
-- **Module dependency**: Executable imports library as "default_lib"
-- **Test coverage**: Both modules include comprehensive unit tests
+- **C++ Integration**: `src/solver.cc` - C++ wrapper for ceres-solver functions
+- **Build Module**: `src/build/ceres.zig` - Complex ceres-solver integration and WASM support
+- **Headers**: `include/` - C interface headers for external usage
+- **Test coverage**: Library includes comprehensive unit tests and former main() functionality
 
 ### Nix Integration
 ```bash
@@ -72,7 +73,6 @@ nix build          # Default Nix-friendly binaries
 nix build .#foreign # Musl-linked binaries for non-Nix distribution
 
 # Development and testing
-nix run .#build     # Build with arguments
 nix run .#test      # Run tests via Nix
 nix run .#build-wasm # Build WASM with proper Emscripten environment
 ```
@@ -82,12 +82,18 @@ nix run .#build-wasm # Build WASM with proper Emscripten environment
 ### Current Implementation
 - **Language**: Zig (minimum version 0.14.1)
 - **Build system**: Complete zig2nix integration with cross-platform support
-- **Code structure**: Library/executable hybrid with clean module separation
+- **Code structure**: Library-only with C++ integration via ceres-solver
 - **Testing infrastructure**: Unit tests, integration tests, and fuzz testing examples
 - **Package management**: Ready for external dependencies via build.zig.zon
+
+### Ceres-Solver Integration
+- **Static compilation**: Builds ceres-solver 2.2.0 from source with minimal dependencies
+- **Configuration**: Uses MINIGLOG, disables LAPACK, CUDA, SuiteSparse for portability
+- **WASM support**: Full Emscripten compilation pipeline with sophisticated object file management
+- **IDE support**: Automatic compile_commands.json generation for clangd C++ support
 
 ### Code Quality Pipeline
 - **Automated formatting**: treefmt with pre-commit hooks
 - **Memory safety**: Tests include memory leak detection
 - **Cross-compilation**: Supports all Zig target platforms via Nix
-- **IDE support**: ZLS (Zig Language Server) and Neovim integration
+- **IDE support**: ZLS (Zig Language Server) and clangd integration
