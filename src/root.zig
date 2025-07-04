@@ -11,8 +11,8 @@ test "solver" {
     std.debug.print("Ozric - Ornstein-Zernike equation solver\n", .{});
     std.debug.print("Using Ceres Solver version: {d}\n", .{ceres_version});
 
-    const result = c.run_hello_world();
-    std.debug.print("Hello World result: x = {d} (should be ~10.0)\n", .{result});
+    const result = c.solve();
+    std.debug.print("Solver result: x = {d} (should be ~10.0)\n", .{result});
 
     try testing.expectApproxEqAbs(10.0, result, 1e-4);
 }

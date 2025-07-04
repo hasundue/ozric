@@ -8,8 +8,8 @@ extern "C" {
 // Get Ceres Solver major version number
 int test_ceres(void);
 
-// Run Ceres hello world example (minimizes 0.5 * (10 - x)^2)
-double run_hello_world(void);
+// Run Ceres solver example (minimizes 0.5 * (10 - x)^2)
+double solve(void);
 
 #ifdef __cplusplus
 }

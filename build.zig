@@ -108,7 +108,7 @@ pub fn build(b: *std.Build) void {
             "-sPTHREAD_POOL_SIZE=4",
             "-sINITIAL_MEMORY=167772160", // 160MB
             "-sUSE_OFFSET_CONVERTER",
-            "-sEXPORTED_FUNCTIONS=['_test_ceres','_run_hello_world']",
+            "-sEXPORTED_FUNCTIONS=['_test_ceres','_solve']",
             "-sEXPORTED_RUNTIME_METHODS=ccall,cwrap,PThread",
             "-O0",
             "--cache",

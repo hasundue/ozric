@@ -12,11 +12,11 @@ Module.onRuntimeInitialized = () => {
         const version = Module.ccall('test_ceres', 'number', [], []);
         console.log(`📋 Ceres version major: ${version}`);
         
-        // Test hello world optimization using ccall
-        console.log('\n🎯 Running Ceres hello world optimization...');
+        // Test solver optimization using ccall
+        console.log('\n🎯 Running Ceres solver optimization...');
         console.log('   Problem: minimize 0.5 * (10 - x)^2, initial x = 5.0');
         
-        const result = Module.ccall('run_hello_world', 'number', [], []);
+        const result = Module.ccall('solve', 'number', [], []);
         console.log(`   ✨ Optimized result: x = ${result}`);
         console.log(`   📈 Expected: x ≈ 10.0 (theoretical minimum)`);
         

@@ -17,7 +17,7 @@ struct CostFunctor {
 };
 
 // Real Ceres hello world example - minimize 0.5 * (10 - x)^2
-extern "C" double run_hello_world() {
+extern "C" double solve() {
     // The variable to solve for, with an initial value.
     double initial_x = 5.0;
     double x = initial_x;
