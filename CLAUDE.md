@@ -4,7 +4,10 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Ozric is a proof-of-concept solver for Ornstein-Zernike equations implemented in Zig. The project integrates C mathematics libraries (BLAS, LAPACK, FFTW) for numerical computations in statistical mechanics and liquid theory.
+Ozric is an Ornstein-Zernike (OZ) equation solver that leverages ceres-solver for optimization, cross-compiled with Zig. The project **statically compiles ceres-solver from source** using Zig's build system, integrating C++ numerical optimization libraries for solving nonlinear systems in statistical mechanics and liquid theory.
+
+### Core Design Principle
+**IMPORTANT**: This project compiles ceres-solver from source using Zig, NOT using pre-built libraries. Static compilation with Zig is fundamental to the project architecture.
 
 ## Development Environment
 
@@ -12,11 +15,12 @@ Ozric is a proof-of-concept solver for Ornstein-Zernike equations implemented in
 This project uses Nix flakes for reproducible development environments:
 
 ```bash
-# Enter development shell
+# Enter development shell (includes ZLS, clangd, treefmt)
 nix develop
 
-# Build the project (once implemented)
+# Build the library
 nix build
+nix build .#foreign  # Musl-linked binaries for non-Nix distribution
 
 # Format code
 treefmt
@@ -29,24 +33,67 @@ The repository uses direnv with two flakes:
 
 ### Code Formatting
 - Pre-commit hooks automatically run `treefmt` on commit
-- Currently configured for Nix files; will need Zig formatting when source code is added
+- Currently configured for Nix files; Zig formatting can be added to treefmt.nix
 - Use `treefmt --fail-on-change --no-cache` to check formatting
+- Git hooks are managed by git-hooks.nix (do not manually edit .pre-commit-config.yaml)
+
+## Build System
+
+### Zig Build Configuration
+The project uses Zig's native build system as a **library-only** project:
+
+```bash
+# Build the library
+zig build
+
+# Run all tests (includes former main() functionality as test)
+zig build test
+
+# Generate compile_commands.json for clangd
+zig build compile-commands
+
+# Generate fish shell completions
+zig build fish-completions
+
+# Build WASM (use Nix for proper environment)
+nix run .#build-wasm
+```
+
+### Build Targets and Structure
+- **Library module**: `src/root.zig` - Core functionality with exported functions
+- **C++ Integration**: `src/solver.cc` - C++ wrapper for ceres-solver functions
+- **Build Module**: `src/build/ceres.zig` - Complex ceres-solver integration and WASM support
+- **Headers**: `include/` - C interface headers for external usage
+- **Test coverage**: Library includes comprehensive unit tests and former main() functionality
+
+### Nix Integration
+```bash
+# Build with Nix (two variants available)
+nix build          # Default Nix-friendly binaries
+nix build .#foreign # Musl-linked binaries for non-Nix distribution
+
+# Development and testing
+nix run .#test      # Run tests via Nix
+nix run .#build-wasm # Build WASM with proper Emscripten environment
+```
 
 ## Architecture
 
-### Current State
-The project is in initial setup phase with no Zig source code yet. The foundation includes:
-- Cross-platform Nix development environment (Linux x86_64/aarch64, macOS x86_64/aarch64)
-- Automated code formatting and git hooks
-- MIT license (Copyright 2025 Shun Ueda)
+### Current Implementation
+- **Language**: Zig (minimum version 0.14.1)
+- **Build system**: Complete zig2nix integration with cross-platform support
+- **Code structure**: Library-only with C++ integration via ceres-solver
+- **Testing infrastructure**: Unit tests, integration tests, and fuzz testing examples
+- **Package management**: Ready for external dependencies via build.zig.zon
 
-### Planned Architecture
-- **Language**: Zig for the main solver implementation
-- **Dependencies**: C mathematics libraries (BLAS, LAPACK, FFTW)
-- **Domain**: Ornstein-Zernike equation solving for statistical mechanics
+### Ceres-Solver Integration
+- **Static compilation**: Builds ceres-solver 2.2.0 from source with minimal dependencies
+- **Configuration**: Uses MINIGLOG, disables LAPACK, CUDA, SuiteSparse for portability
+- **WASM support**: Full Emscripten compilation pipeline with sophisticated object file management
+- **IDE support**: Automatic compile_commands.json generation for clangd C++ support
 
-## Important Notes
-
-- No build system (build.zig) exists yet - will need to be created when implementing Zig code
-- The `flake.nix` placeholder package (`pkgs.hello`) should be replaced with actual Zig package
-- Development environment loads from `../nvim#zig`, suggesting a shared Neovim+Zig setup
+### Code Quality Pipeline
+- **Automated formatting**: treefmt with pre-commit hooks
+- **Memory safety**: Tests include memory leak detection
+- **Cross-compilation**: Supports all Zig target platforms via Nix
+- **IDE support**: ZLS (Zig Language Server) and clangd integration

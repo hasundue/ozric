@@ -1,4 +1,20 @@
+# Nix build artifacts
 result
 result-*
+
+# Nix devshell artifacts
 .direnv/
 .pre-commit-config.yaml
+
+# Zig build artifacts
+.zig-cache/
+zig-cache/
+zig-out/
+/release/
+/debug/
+/build/
+/build-*/
+/docgen_tmp/
+.cache/clangd/index
+compile_commands.json
+completions/zig.fish

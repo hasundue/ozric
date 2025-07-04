@@ -1,0 +1,25 @@
+CompileFlags:
+  # Additional flags for better C++ support
+  Add:
+    - -std=c++17
+    - -Wall
+    - -Wextra
+  # Remove flags that might cause issues
+  Remove:
+    - -W*
+    - -w
+
+Diagnostics:
+  # Enable proper include diagnostics
+  UnusedIncludes: Strict
+  MissingIncludes: None
+
+Index:
+  # Skip indexing build artifacts
+  Background: Build
+  
+InlayHints:
+  # Show type hints
+  Enabled: true
+  ParameterNames: true
+  DeducedTypes: true
