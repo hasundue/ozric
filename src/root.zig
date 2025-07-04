@@ -1,6 +1,3 @@
-//! By convention, root.zig is the root source file when making a library. If
-//! you are making an executable, the convention is to delete this file and
-//! start with main.zig instead.
 const std = @import("std");
 const testing = std.testing;
 
@@ -22,4 +19,16 @@ pub export fn add(a: i32, b: i32) i32 {
 
 test "basic add functionality" {
     try testing.expect(add(3, 7) == 10);
+}
+
+test "ozric main functionality" {
+    const ceres_version = getCeresVersion();
+
+    std.debug.print("Ozric - Ornstein-Zernike equation solver\n", .{});
+    std.debug.print("Using Ceres Solver version: {d}\n", .{ceres_version});
+
+    const result = runHelloWorld();
+    std.debug.print("Hello World result: x = {d} (should be ~10.0)\n", .{result});
+
+    try testing.expectApproxEqAbs(10.0, result, 1e-4);
 }
