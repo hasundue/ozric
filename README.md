@@ -1,10 +1,10 @@
 # Ozric
 
-An Ornstein-Zernike (OZ) equation solver using ceres-solver, cross-compiled with Zig.
+A classical density functional theory (DFT) solver using ceres-solver, cross-compiled with Zig.
 
 ## Overview
 
-Ozric leverages the ceres-solver optimization library to solve nonlinear systems arising from Ornstein-Zernike equations in statistical mechanics and liquid theory. The project uses Zig as the integration layer for cross-platform compilation and C++ library binding.
+Ozric leverages the ceres-solver optimization library to solve nonlinear systems arising from classical density functional theory. The project focuses on variational optimization problems in statistical mechanics, particularly free energy functionals and density distributions. Zig serves as the integration layer for cross-platform compilation and C++ library binding.
 
 ## Quick Start
 
@@ -38,7 +38,8 @@ zig build test
 ## Architecture
 
 - **Core**: Zig application with dual library/executable structure
-- **Optimization**: ceres-solver integration for nonlinear system solving
+- **Optimization**: ceres-solver integration for variational DFT problems
+- **Applications**: Free energy minimization, density profile optimization, phase transitions
 - **Build system**: zig2nix for cross-platform Nix integration
 - **Development**: Automated formatting, pre-commit hooks, comprehensive testing
 
@@ -68,4 +69,4 @@ zig build fish-completions  # Generate fish shell completions
 
 ## Status
 
-Foundation implemented - ready for ceres-solver integration and OZ equation system development.
+Foundation implemented - ready for classical DFT functional development and variational optimization problems.

@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Ozric is an Ornstein-Zernike (OZ) equation solver that leverages ceres-solver for optimization, cross-compiled with Zig. The project **statically compiles ceres-solver from source** using Zig's build system, integrating C++ numerical optimization libraries for solving nonlinear systems in statistical mechanics and liquid theory.
+Ozric is a classical density functional theory (DFT) solver that leverages ceres-solver for optimization, cross-compiled with Zig. The project **statically compiles ceres-solver from source** using Zig's build system, integrating C++ numerical optimization libraries for solving variational problems in statistical mechanics, particularly free energy functionals and density distributions.
 
 ### Core Design Principle
 **IMPORTANT**: This project compiles ceres-solver from source using Zig, NOT using pre-built libraries. Static compilation with Zig is fundamental to the project architecture.
