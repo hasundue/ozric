@@ -114,6 +114,7 @@
             treefmt = treefmt-nix.lib.mkWrapper pkgs {
               programs.nixfmt.enable = true;
               programs.zig.enable = true;
+              programs.clang-format.enable = true;
             };
             githooks = githooks-nix.lib.${system}.run {
               src = ./.;

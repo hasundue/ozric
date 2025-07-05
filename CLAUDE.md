@@ -32,10 +32,14 @@ The repository uses direnv with two flakes:
 - `.` - Local project dependencies
 
 ### Code Formatting
-- Pre-commit hooks automatically run `treefmt` on commit
-- Currently configured for Nix files; Zig formatting can be added to treefmt.nix
-- Use `treefmt --fail-on-change --no-cache` to check formatting
-- Git hooks are managed by git-hooks.nix (do not manually edit .pre-commit-config.yaml)
+- **Automated formatting**: treefmt with pre-commit hooks
+- **Languages supported**: Zig (zig fmt), C++ (clang-format), Nix (nixfmt)
+- **C++ style**: Google style with 4-space indentation (configured in `.clang-format`)
+- **Zig style**: Standard zig fmt with 4-space indentation (non-configurable)
+- **Consistency**: Both Zig and C++ use 4-space indentation for uniformity
+- **Usage**: Run `treefmt` manually or automatic via pre-commit hooks
+- **Validation**: Use `treefmt --fail-on-change --no-cache` to check formatting
+- **Configuration**: Git hooks managed by git-hooks.nix (do not manually edit .pre-commit-config.yaml)
 
 ## Build System
 

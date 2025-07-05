@@ -51,6 +51,12 @@ zig build test
 - Automatically generates `compile_commands.json` when entering the development environment
 - Provides full IDE features for C++ code including autocomplete, error checking, and go-to-definition
 
+**Code Formatting**:
+- Automated formatting with `treefmt` (Zig, C++, Nix)
+- C++ formatting based on Google style with 4-space indentation (matches Zig)
+- Pre-commit hooks automatically format code on commit
+- Run manually: `treefmt`
+
 **Fish Shell Completions**:
 - Automatically generates shell completions for custom `zig build` steps
 - To use: `source completions/zig.fish` in fish shell
@@ -65,6 +71,7 @@ zig build test              # Run tests
 zig build wasm              # Build WebAssembly version
 zig build compile-commands  # Generate clangd compilation database
 zig build fish-completions  # Generate fish shell completions
+treefmt                     # Format all code (Zig, C++, Nix)
 ```
 
 ## Status
