@@ -9,9 +9,6 @@ pub const Grid = struct {
     /// System size
     size: f64,
 
-    /// Number of grid points
-    n: usize,
-
     /// Pre-computed grid points array
     points: []f64,
 
@@ -33,7 +30,6 @@ pub const Grid = struct {
         return Self{
             .spacing = spacing,
             .size = size,
-            .n = n,
             .points = points,
             .allocator = allocator,
         };
@@ -46,7 +42,7 @@ pub const Grid = struct {
 
     /// Get FFT size for calculations
     pub fn getFftSize(self: Self) usize {
-        return util.nextPowerOfTwo(2 * self.n);
+        return util.nextPowerOfTwo(2 * self.points.len);
     }
 };
 
@@ -54,7 +50,7 @@ test "Grid init" {
     var grid = try Grid.init(t.allocator, 100, 10.0);
     defer grid.deinit();
 
-    try t.expectEqual(@as(usize, 100), grid.n);
+    try t.expectEqual(@as(usize, 100), grid.points.len);
     try t.expectEqual(@as(f64, 10.0), grid.size);
     try t.expectEqual(@as(f64, 0.1), grid.spacing);
     try t.expectEqual(@as(usize, 100), grid.points.len);
