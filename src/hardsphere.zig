@@ -71,7 +71,7 @@ test "HardSphereDFT init" {
     try t.expectEqual(@as(f64, 1.0), hs.diameter);
 }
 
-test "HardSphereDFT weightFnFirst" {
+test "HardSphereDFT weightFn1" {
     const hs = HardSphereDFT.init(1.0);
 
     try t.expectApproxEqAbs(0.90724, hs.weightFn1(0), 1e-5);
@@ -119,10 +119,10 @@ pub const HardSphereKernel = struct {
         // Fill in the upper triangle of the matrices
         for (0..n) |i| {
             for (i..n) |j| {
-                const r_distance = grid.distance(i, j);
-                weight_fns[0].ptr(i, j).* = hs.weightFn0(r_distance);
-                weight_fns[1].ptr(i, j).* = hs.weightFn1(r_distance);
-                weight_fns[2].ptr(i, j).* = hs.weightFn2(r_distance);
+                const d = grid.distance(i, j);
+                weight_fns[0].ptr(i, j).* = hs.weightFn0(d);
+                weight_fns[1].ptr(i, j).* = hs.weightFn1(d);
+                weight_fns[2].ptr(i, j).* = hs.weightFn2(d);
             }
         }
 
