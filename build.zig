@@ -1,5 +1,5 @@
 const std = @import("std");
-const ceres = @import("src/build/ceres.zig");
+const b_ceres = @import("src/build/ceres.zig");
 
 pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
@@ -15,9 +15,48 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
 
+    // Zig bindings to Ceres
+    const ceres = blk: {
+        const mod = b.createModule(.{
+            .root_source_file = b.path("src/ceres.zig"),
+            .target = target,
+            .optimize = optimize,
+        });
+
+        const lib = b.addLibrary(.{
+            .linkage = .static,
+            .name = "ceres",
+            .root_module = mod,
+        });
+
+        lib.addCSourceFiles(.{
+            .root = b.path("src"),
+            .files = &.{"ceres.cc"},
+        });
+
+        b_ceres.addCeresSupport(b, lib, ceres_dep, eigen);
+
+        const tests = b.addTest(.{
+            .root_module = mod,
+        });
+
+        break :blk .{
+            .mod = mod,
+            .lib = lib,
+            .tests = tests,
+        };
+    };
+
+    // Build and test Ceres bindings
+    {
+        const step = b.step("ceres", "Test Ceres bindings");
+        const run_tests = b.addRunArtifact(ceres.tests);
+        step.dependOn(&run_tests.step);
+    }
+
     // Library
     const lib = blk: {
-        const lib_mod = b.createModule(.{
+        const mod = b.createModule(.{
             .root_source_file = b.path("src/root.zig"),
             .target = target,
             .optimize = optimize,
@@ -26,30 +65,21 @@ pub fn build(b: *std.Build) void {
         const lib = b.addLibrary(.{
             .linkage = .static,
             .name = "ozric",
-            .root_module = lib_mod,
+            .root_module = mod,
         });
 
-        lib.addCSourceFiles(.{
-            .root = b.path("src"),
-            .files = &.{"solver.cc"},
+        const tests = b.addTest(.{
+            .root_module = mod,
         });
 
-        // Add Ceres-solver support using the extracted module
-        ceres.addCeresSupport(b, lib, ceres_dep, eigen);
-
-        b.installArtifact(lib);
-        break :blk .{ .artifact = lib, .module = lib_mod };
+        break :blk .{ .artifact = lib, .module = mod, .tests = tests };
     };
 
-    // Test step
+    // Test Zig library
     {
-        const lib_tests = b.addTest(.{
-            .root_module = lib.module,
-        });
-        const run_lib_tests = b.addRunArtifact(lib_tests);
-
-        const test_step = b.step("test", "Run unit tests");
-        test_step.dependOn(&run_lib_tests.step);
+        const step = b.step("test", "Run unit tests");
+        const run = b.addRunArtifact(lib.tests);
+        step.dependOn(&run.step);
     }
 
     // WASM step
@@ -57,7 +87,7 @@ pub fn build(b: *std.Build) void {
         const wasm_step = b.step("wasm", "Build WASM using Emscripten");
 
         // Get all source files for WASM compilation
-        var all_sources = ceres.getCeresSources(ceres_dep, b.allocator) catch @panic("OOM");
+        var all_sources = b_ceres.getCeresSources(ceres_dep, b.allocator) catch @panic("OOM");
 
         // Add our project-specific C++ wrapper
         all_sources.append(.{
@@ -70,7 +100,7 @@ pub fn build(b: *std.Build) void {
         var compile_steps = std.ArrayList(*std.Build.Step).init(b.allocator);
 
         for (all_sources.items) |source_info| {
-            const compile_cmd = b.addSystemCommand(&ceres.emcc_compile_command);
+            const compile_cmd = b.addSystemCommand(&b_ceres.emcc_compile_command);
 
             // Set environment variables
             compile_cmd.setEnvironmentVariable("EMCC_DEBUG", "1");
@@ -78,7 +108,7 @@ pub fn build(b: *std.Build) void {
             compile_cmd.setEnvironmentVariable("CCACHE_IGNOREOPTIONS", "-v -g* -W* --verbose");
 
             // Add include paths using the ceres module
-            ceres.addEmccIncludePaths(compile_cmd, b, ceres_dep, eigen);
+            b_ceres.addEmccIncludePaths(compile_cmd, b, ceres_dep, eigen);
 
             // Input source file
             const source_path = b.fmt("{s}/{s}", .{ source_info.base_dir.getPath(b), source_info.path });
@@ -148,12 +178,12 @@ pub fn build(b: *std.Build) void {
         writer.print("clang++", .{}) catch @panic("OOM");
 
         // Add all ceres flags
-        for (ceres.ceres_flags) |flag| {
+        for (b_ceres.ceres_flags) |flag| {
             writer.print(" {s}", .{flag}) catch @panic("OOM");
         }
 
         // Add include paths using the same function as addCeresSupport
-        ceres.addIncludePathsToWriter(writer, b, ceres_dep, eigen) catch @panic("OOM");
+        b_ceres.addIncludePathsToWriter(writer, b, ceres_dep, eigen) catch @panic("OOM");
         writer.print(" -c src/solver.cc", .{}) catch @panic("OOM");
 
         // Serialize to JSON using std.json

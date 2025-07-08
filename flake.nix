@@ -97,7 +97,7 @@
           ] "zig build --sysroot ${pkgs.emscripten}/upstream/emscripten wasm -- \"$@\"";
 
         # nix run .#test
-        apps.test = env.app [ ] "zig build test -- \"$@\"";
+        apps.test = env.app [ ] "zig build test --summary all -- \"$@\"";
 
         # nix run .#test-wasm
         apps.test-wasm = env.app [ pkgs.nodejs ] "node tests/test_wasm.js -- \"$@\"";

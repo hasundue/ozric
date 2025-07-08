@@ -3,18 +3,17 @@ const std = @import("std");
 /// Compilation flags for Ceres solver with MINIGLOG for 2.2.0
 pub const ceres_flags = [_][]const u8{
     "-std=c++17",
-    "-DCERES_NO_SUITESPARSE",
-    "-DCERES_NO_CXSPARSE",
     "-DCERES_EXPORT=", // Define CERES_EXPORT as empty
-    "-DCERES_NO_EXPORT=", // Define CERES_NO_EXPORT as empty
-    "-DCERES_NO_PROTOCOL_BUFFERS",
-    "-DCERES_NO_THREADS",
-    "-DCERES_NO_CUDA", // Disable CUDA support
-    "-DCERES_NO_LAPACK", // Disable LAPACK dependencies
     "-DCERES_METIS_VERSION=\"5.1.0\"", // Define METIS version
-    "-DMINIGLOG", // Use minimal logging instead of full glog
-    "-DCERES_RESTRICT_SCHUR_SPECIALIZATION", // Restrict Schur specializations
     "-DCERES_NO_ACCELERATE_SPARSE", // Disable Accelerate sparse support
+    "-DCERES_NO_CUDA", // Disable CUDA support
+    "-DCERES_NO_EIGEN_METIS",
+    "-DCERES_NO_EXPORT=", // Define CERES_NO_EXPORT as empty
+    "-DCERES_NO_LAPACK", // Disable LAPACK dependencies
+    "-DCERES_NO_SUITESPARSE",
+    // "-DCERES_NO_THREADS",
+    "-DCERES_RESTRICT_SCHUR_SPECIALIZATION", // Restrict Schur specializations
+    "-DMINIGLOG", // Use minimal logging instead of full glog
 };
 
 /// Core Ceres source files in internal/ceres/
