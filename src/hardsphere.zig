@@ -5,20 +5,18 @@ const grid_mod = @import("grid.zig");
 const Grid = grid_mod.Grid;
 
 pub const HardSphereDFT = struct {
-    /// Hard sphere diameter (sigma)
+    /// Hard-sphere diameter
     diameter: f64,
 
     const Self = @This();
 
-    /// Initialize the hard sphere system
     pub fn init(diameter: f64) Self {
         return Self{
             .diameter = diameter,
         };
     }
 
-    /// Zeroth-order weight function
-    pub fn weightFunctionZeroth(self: Self, r: f64) f64 {
+    pub fn weightFnZeroth(self: Self, r: f64) f64 {
         if (r > self.diameter) return 0.0;
 
         const sigma3 = math.pow(f64, self.diameter, 3);
@@ -27,8 +25,7 @@ pub const HardSphereDFT = struct {
         return 3 / (4 * pi * sigma3);
     }
 
-    /// First-order weight function
-    pub fn weightFunctionFirst(self: Self, r: f64) f64 {
+    pub fn weightFnFirst(self: Self, r: f64) f64 {
         const x = r / self.diameter;
         const x2 = math.pow(f64, x, 2);
 
@@ -50,21 +47,21 @@ pub const HardSphereDFT = struct {
             const beta_2 = 12.0;
             const b_3 = -29.257;
 
-            const term1 = c * @exp(-beta_1 * (x - 1.0)) * @sin(alpha * (x - 1.0));
-            const term2 = @exp(-beta_2 * (x - 1.0)) * (b_0 + b_1 * x + b_2 * x2 + b_3 * x3);
-            return term1 + term2;
+            const first = c * @exp(-beta_1 * (x - 1.0)) * @sin(alpha * (x - 1.0));
+            const second = @exp(-beta_2 * (x - 1.0)) * (b_0 + b_1 * x + b_2 * x2 + b_3 * x3);
+
+            return first + second;
         }
     }
 
-    /// Second-order weight function
-    pub fn weightFunctionSecond(self: Self, r: f64) f64 {
+    pub fn weightFnSecond(self: Self, r: f64) f64 {
         if (r >= self.diameter) return 0.0;
 
         const x = r / self.diameter;
         const x2 = x * x;
         const pi = math.pi;
 
-        return (15 / 8 / pi / self.diameter) * (1 - 3 * x + 3 * x2);
+        return (15.0 / 8.0 / pi / self.diameter) * (1 - 3 * x + 3 * x2);
     }
 };
 
@@ -73,31 +70,31 @@ test "HardSphereDFT init" {
     try t.expectEqual(@as(f64, 1.0), hs.diameter);
 }
 
-test "HardSphereDFT weightFunctionFirst" {
+test "HardSphereDFT weightFnFirst" {
     const hs = HardSphereDFT.init(1.0);
 
-    try t.expectApproxEqAbs(0.90724, hs.weightFunctionFirst(0), 1e-5);
+    try t.expectApproxEqAbs(0.90724, hs.weightFnFirst(0), 1e-5);
 
     // Should be positive deep inside the sphere
-    try t.expect(hs.weightFunctionFirst(0.5) > 0);
+    try t.expect(hs.weightFnFirst(0.5) > 0);
 
     // Should be negative at contact distance
-    try t.expect(hs.weightFunctionFirst(1.0) < 0);
+    try t.expect(hs.weightFnFirst(1.0) < 0);
 
     // Test continuity at contact distance
     const eps = 1e-6;
-    try t.expectApproxEqAbs(hs.weightFunctionFirst(1.0 - eps), hs.weightFunctionFirst(1.0 + eps), 1e-3);
+    try t.expectApproxEqAbs(hs.weightFnFirst(1.0 - eps), hs.weightFnFirst(1.0 + eps), 1e-3);
 
     // Test oscillating structure of the tail
-    try t.expect(hs.weightFunctionFirst(1.5) < 0);
-    try t.expect(hs.weightFunctionFirst(2.0) > 0);
-    try t.expect(hs.weightFunctionFirst(2.5) < 0);
+    try t.expect(hs.weightFnFirst(1.5) < 0);
+    try t.expect(hs.weightFnFirst(2.0) > 0);
+    try t.expect(hs.weightFnFirst(2.5) < 0);
 }
 
 pub const HardSphereKernel = struct {
     /// The expansion coefficients of density-independent weights over the grid
     /// combinations, or w_i(|r - r'|)
-    weight_functions: [3][][]f64,
+    weight_fns: [3][][]f64,
 
     /// Reference to the grid
     grid: *const Grid,
@@ -112,18 +109,32 @@ pub const HardSphereKernel = struct {
 
     pub fn init(allocator: std.mem.Allocator, grid: *const Grid, hs: *const HardSphereDFT) !Self {
         const n = grid.points.len;
-        var weight_functions: [3][][]f64 = undefined;
+        var weight_fns: [3][][]f64 = undefined;
 
-        // Allocate memory for weight matrices (N×N)
         for (0..3) |i| {
-            weight_functions[i] = try allocator.alloc([]f64, n);
+            weight_fns[i] = try allocator.alloc([]f64, n);
             for (0..n) |j| {
-                weight_functions[i][j] = try allocator.alloc(f64, n);
+                weight_fns[i][j] = try allocator.alloc(f64, n);
+            }
+        }
+        for (0..n) |i| {
+            for (i..n) |j| {
+                const r_distance = grid.distance(i, j);
+                weight_fns[0][i][j] = hs.weightFnZeroth(r_distance);
+                weight_fns[1][i][j] = hs.weightFnFirst(r_distance);
+                weight_fns[2][i][j] = hs.weightFnSecond(r_distance);
+            }
+        }
+        for (0..n) |i| {
+            for (0..i) |j| {
+                weight_fns[0][i][j] = weight_fns[0][j][i];
+                weight_fns[1][i][j] = weight_fns[1][j][i];
+                weight_fns[2][i][j] = weight_fns[2][j][i];
             }
         }
 
         return Self{
-            .weight_functions = weight_functions,
+            .weight_fns = weight_fns,
             .grid = grid,
             .hs = hs,
             .allocator = allocator,
@@ -134,33 +145,26 @@ pub const HardSphereKernel = struct {
         // Free weight matrices
         for (0..3) |i| {
             for (0..self.grid.points.len) |j| {
-                self.allocator.free(self.weight_functions[i][j]);
+                self.allocator.free(self.weight_fns[i][j]);
             }
-            self.allocator.free(self.weight_functions[i]);
-        }
-    }
-
-    pub fn computeWeights(self: *Self) void {
-        const n = self.grid.points.len;
-        // Compute weights for upper triangle (i <= j)
-        for (0..n) |i| {
-            for (i..n) |j| {
-                const r_distance = self.grid.distance(i, j);
-                self.weight_functions[0][i][j] = self.hs.weightFunctionZeroth(r_distance);
-                self.weight_functions[1][i][j] = self.hs.weightFunctionFirst(r_distance);
-                self.weight_functions[2][i][j] = self.hs.weightFunctionSecond(r_distance);
-            }
-        }
-        // Fill lower triangle by symmetry
-        for (0..n) |j| {
-            for (j..n) |i| {
-                self.weight_functions[0][i][j] = self.weight_functions[0][j][i];
-                self.weight_functions[1][i][j] = self.weight_functions[1][j][i];
-                self.weight_functions[2][i][j] = self.weight_functions[2][j][i];
-            }
+            self.allocator.free(self.weight_fns[i]);
         }
     }
 };
+
+test "HardSphereKernel init" {
+    const allocator = t.allocator;
+    var grid = try Grid.init(allocator, 10, 5.0);
+    defer grid.deinit();
+    const hs = HardSphereDFT.init(1.0);
+    var kernel = try HardSphereKernel.init(allocator, &grid, &hs);
+    defer kernel.deinit();
+
+    // Check that the weight functions are initialized correctly
+    try t.expect(kernel.weight_fns[0][0][1] == hs.weightFnZeroth(grid.distance(0, 1)));
+    try t.expect(kernel.weight_fns[1][0][1] == hs.weightFnFirst(grid.distance(0, 1)));
+    try t.expect(kernel.weight_fns[2][0][1] == hs.weightFnSecond(grid.distance(0, 1)));
+}
 
 pub const HardSphereWorkspace = struct {
     /// The smoothed (weighted) density profile
@@ -179,7 +183,7 @@ pub const HardSphereWorkspace = struct {
     weighted_density_fourier: []math.Complex(f64),
 
     /// Fourier-transformed expansion coefficients
-    weight_functions_fourier: [3][]math.Complex(f64),
+    weight_fns_fourier: [3][]math.Complex(f64),
 
     /// Allocator used for memory management
     allocator: std.mem.Allocator,
@@ -192,10 +196,10 @@ pub const HardSphereWorkspace = struct {
 
     const Self = @This();
 
-    /// Initialize the density functional workspace buffers
+    /// Initialize the density fnal workspace buffers
     pub fn init(allocator: std.mem.Allocator, grid: *const Grid, hs: *const HardSphereDFT) !Self {
         var weighted_density_expansions: [3][]f64 = undefined;
-        var weight_functions_fourier: [3][]math.Complex(f64) = undefined;
+        var weight_fns_fourier: [3][]math.Complex(f64) = undefined;
 
         const n = grid.points.len;
         const fft_size = grid.getFftSize();
@@ -207,7 +211,7 @@ pub const HardSphereWorkspace = struct {
 
         // Allocate memory for Fourier-transformed weights
         for (0..3) |i| {
-            weight_functions_fourier[i] = try allocator.alloc(math.Complex(f64), fft_size);
+            weight_fns_fourier[i] = try allocator.alloc(math.Complex(f64), fft_size);
         }
 
         return Self{
@@ -216,7 +220,7 @@ pub const HardSphereWorkspace = struct {
             .weighted_density_expansions = weighted_density_expansions,
             .density_fourier = try allocator.alloc(math.Complex(f64), fft_size),
             .weighted_density_fourier = try allocator.alloc(math.Complex(f64), fft_size),
-            .weight_functions_fourier = weight_functions_fourier,
+            .weight_fns_fourier = weight_fns_fourier,
             .allocator = allocator,
             .grid = grid,
             .hs = hs,
@@ -235,7 +239,7 @@ pub const HardSphereWorkspace = struct {
 
             // Free Fourier-transformed weights
             for (0..3) |i| {
-                self.allocator.free(self.weight_functions_fourier[i]);
+                self.allocator.free(self.weight_fns_fourier[i]);
             }
 
             self.allocator.free(self.density_fourier);
