@@ -97,17 +97,17 @@ pub const HardSphereKernel = struct {
     weight_fns: [3][][]f64,
 
     /// Reference to the grid
-    grid: *const Grid,
+    grid: Grid,
 
     /// Reference to the hard sphere DFT
-    hs: *const HardSphereDFT,
+    hs: HardSphereDFT,
 
     /// Allocator for memory management
     allocator: std.mem.Allocator,
 
     const Self = @This();
 
-    pub fn init(allocator: std.mem.Allocator, grid: *const Grid, hs: *const HardSphereDFT) !Self {
+    pub fn init(allocator: std.mem.Allocator, grid: Grid, hs: HardSphereDFT) !Self {
         const n = grid.points.len;
         var weight_fns: [3][][]f64 = undefined;
 
@@ -157,7 +157,7 @@ test "HardSphereKernel init" {
     var grid = try Grid.init(allocator, 10, 5.0);
     defer grid.deinit();
     const hs = HardSphereDFT.init(1.0);
-    var kernel = try HardSphereKernel.init(allocator, &grid, &hs);
+    var kernel = try HardSphereKernel.init(allocator, grid, hs);
     defer kernel.deinit();
 
     // Check that the weight functions are initialized correctly
@@ -189,15 +189,15 @@ pub const HardSphereWorkspace = struct {
     allocator: std.mem.Allocator,
 
     /// Reference to the grid
-    grid: *const Grid,
+    grid: Grid,
 
     /// Reference to the hard sphere DFT
-    hs: *const HardSphereDFT,
+    hs: HardSphereDFT,
 
     const Self = @This();
 
     /// Initialize the density fnal workspace buffers
-    pub fn init(allocator: std.mem.Allocator, grid: *const Grid, hs: *const HardSphereDFT) !Self {
+    pub fn init(allocator: std.mem.Allocator, grid: Grid, hs: HardSphereDFT) !Self {
         var weighted_density_expansions: [3][]f64 = undefined;
         var weight_fns_fourier: [3][]math.Complex(f64) = undefined;
 
@@ -253,6 +253,6 @@ test "HardSphereWorkspace init" {
     var grid = try Grid.init(allocator, 10, 5.0);
     defer grid.deinit();
     const hs = HardSphereDFT.init(1.0);
-    var workspace = try HardSphereWorkspace.init(allocator, &grid, &hs);
+    var workspace = try HardSphereWorkspace.init(allocator, grid, hs);
     defer workspace.deinit();
 }
