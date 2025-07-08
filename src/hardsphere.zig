@@ -94,6 +94,34 @@ test "HardSphereDFT weightFunctionFirst" {
     try t.expect(hs.weightFunctionFirst(2.5) < 0);
 }
 
+pub const HardSphereKernel = struct {
+    /// The expansion coefficients of density-independent weights over the grid
+    /// combinations, or weight_functions(|r - r'|) - 3 matrices of size N×N
+    weight_functions: [3][][]f64,
+
+    const Self = @This();
+
+    pub fn init(self: *Self) void {
+        // Compute weights for upper triangle (i <= j)
+        for (0..self.grid.n) |i| {
+            for (i..self.grid.n) |j| {
+                const r_distance = @abs(self.grid.points[i] - self.grid.points[j]);
+                self.weight_functions[0][i][j] = self.hs.weightFunctionZeroth(r_distance);
+                self.weight_functions[1][i][j] = self.hs.weightFunctionFirst(r_distance);
+                self.weight_functions[2][i][j] = self.hs.weightFunctionSecond(r_distance);
+            }
+        }
+        // Fill lower triangle by symmetry
+        for (0..self.grid.n) |i| {
+            for (0..i) |j| {
+                self.weight_functions[0][i][j] = self.weight_functions[0][j][i];
+                self.weight_functions[1][i][j] = self.weight_functions[1][j][i];
+                self.weight_functions[2][i][j] = self.weight_functions[2][j][i];
+            }
+        }
+    }
+};
+
 pub const HardSphereWorkspace = struct {
     /// The smoothed (weighted) density profile
     weighted_density: []f64,
@@ -110,18 +138,8 @@ pub const HardSphereWorkspace = struct {
     /// Fourier-transformed results for the weighted densities (complex vector)
     weighted_density_fourier: []math.Complex(f64),
 
-    /// The expansion coefficients of density-independent weights over the grid
-    /// combinations, or weight_functions(|r - r'|) - 3 matrices of size N×N
-    weight_functions: [3][][]f64,
-
     /// Fourier-transformed expansion coefficients
     weight_functions_fourier: [3][]math.Complex(f64),
-
-    /// Flag to check if buffers are initialized
-    initialized: bool,
-
-    /// Flag to check if weights are computed
-    weights_computed: bool,
 
     /// Allocator used for memory management
     allocator: std.mem.Allocator,
@@ -137,21 +155,20 @@ pub const HardSphereWorkspace = struct {
     /// Initialize the density functional workspace buffers
     pub fn init(allocator: std.mem.Allocator, grid: *const Grid, hs: *const HardSphereDFT) !Self {
         const fft_size = grid.getFftSize();
-        const num_grid_points = grid.n;
         var weighted_density_expansions: [3][]f64 = undefined;
         var weight_functions: [3][][]f64 = undefined;
         var weight_functions_fourier: [3][]math.Complex(f64) = undefined;
 
         // Allocate memory for each array in weighted_density_expansions
         for (0..3) |i| {
-            weighted_density_expansions[i] = try allocator.alloc(f64, num_grid_points);
+            weighted_density_expansions[i] = try allocator.alloc(f64, grid.n);
         }
 
         // Allocate memory for weight matrices (N×N)
         for (0..3) |i| {
-            weight_functions[i] = try allocator.alloc([]f64, num_grid_points);
-            for (0..num_grid_points) |j| {
-                weight_functions[i][j] = try allocator.alloc(f64, num_grid_points);
+            weight_functions[i] = try allocator.alloc([]f64, grid.n);
+            for (0..grid.n) |j| {
+                weight_functions[i][j] = try allocator.alloc(f64, grid.n);
             }
         }
 
@@ -161,8 +178,8 @@ pub const HardSphereWorkspace = struct {
         }
 
         return Self{
-            .weighted_density = try allocator.alloc(f64, num_grid_points),
-            .weighted_density_derivative = try allocator.alloc(f64, num_grid_points),
+            .weighted_density = try allocator.alloc(f64, grid.n),
+            .weighted_density_derivative = try allocator.alloc(f64, grid.n),
             .weighted_density_expansions = weighted_density_expansions,
             .density_fourier = try allocator.alloc(math.Complex(f64), fft_size),
             .weighted_density_fourier = try allocator.alloc(math.Complex(f64), fft_size),
@@ -205,36 +222,6 @@ pub const HardSphereWorkspace = struct {
             self.initialized = false;
             self.weights_computed = false;
         }
-    }
-
-    /// Precompute weight functions over the grid combinations
-    pub fn precomputeWeights(self: *Self) void {
-        // Skip calculation if weights are already computed
-        if (self.weights_computed) {
-            return;
-        }
-
-        // Compute weights for upper triangle (i <= j)
-        for (0..self.grid.n) |i| {
-            for (i..self.grid.n) |j| {
-                const r_distance = @abs(self.grid.points[i] - self.grid.points[j]);
-                self.weight_functions[0][i][j] = self.hs.weightFunctionZeroth(r_distance);
-                self.weight_functions[1][i][j] = self.hs.weightFunctionFirst(r_distance);
-                self.weight_functions[2][i][j] = self.hs.weightFunctionSecond(r_distance);
-            }
-        }
-
-        // Fill lower triangle by symmetry
-        for (0..self.grid.n) |i| {
-            for (0..i) |j| {
-                self.weight_functions[0][i][j] = self.weight_functions[0][j][i];
-                self.weight_functions[1][i][j] = self.weight_functions[1][j][i];
-                self.weight_functions[2][i][j] = self.weight_functions[2][j][i];
-            }
-        }
-
-        // Mark weights as computed
-        self.weights_computed = true;
     }
 };
 
