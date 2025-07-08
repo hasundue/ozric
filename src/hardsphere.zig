@@ -17,7 +17,7 @@ pub const HardSphereDFT = struct {
         };
     }
 
-    pub fn weightFnZeroth(self: Self, r: f64) f64 {
+    pub fn weightFn0(self: Self, r: f64) f64 {
         if (r > self.diameter) return 0.0;
 
         const sigma3 = math.pow(f64, self.diameter, 3);
@@ -26,7 +26,7 @@ pub const HardSphereDFT = struct {
         return 3 / (4 * pi * sigma3);
     }
 
-    pub fn weightFnFirst(self: Self, r: f64) f64 {
+    pub fn weightFn1(self: Self, r: f64) f64 {
         const x = r / self.diameter;
         const x2 = math.pow(f64, x, 2);
 
@@ -55,7 +55,7 @@ pub const HardSphereDFT = struct {
         }
     }
 
-    pub fn weightFnSecond(self: Self, r: f64) f64 {
+    pub fn weightFn2(self: Self, r: f64) f64 {
         if (r >= self.diameter) return 0.0;
 
         const x = r / self.diameter;
@@ -74,22 +74,22 @@ test "HardSphereDFT init" {
 test "HardSphereDFT weightFnFirst" {
     const hs = HardSphereDFT.init(1.0);
 
-    try t.expectApproxEqAbs(0.90724, hs.weightFnFirst(0), 1e-5);
+    try t.expectApproxEqAbs(0.90724, hs.weightFn1(0), 1e-5);
 
     // Should be positive deep inside the sphere
-    try t.expect(hs.weightFnFirst(0.5) > 0);
+    try t.expect(hs.weightFn1(0.5) > 0);
 
     // Should be negative at contact distance
-    try t.expect(hs.weightFnFirst(1.0) < 0);
+    try t.expect(hs.weightFn1(1.0) < 0);
 
     // Test continuity at contact distance
     const eps = 1e-6;
-    try t.expectApproxEqAbs(hs.weightFnFirst(1.0 - eps), hs.weightFnFirst(1.0 + eps), 1e-3);
+    try t.expectApproxEqAbs(hs.weightFn1(1.0 - eps), hs.weightFn1(1.0 + eps), 1e-3);
 
     // Test oscillating structure of the tail
-    try t.expect(hs.weightFnFirst(1.5) < 0);
-    try t.expect(hs.weightFnFirst(2.0) > 0);
-    try t.expect(hs.weightFnFirst(2.5) < 0);
+    try t.expect(hs.weightFn1(1.5) < 0);
+    try t.expect(hs.weightFn1(2.0) > 0);
+    try t.expect(hs.weightFn1(2.5) < 0);
 }
 
 pub const HardSphereKernel = struct {
@@ -120,9 +120,9 @@ pub const HardSphereKernel = struct {
         for (0..n) |i| {
             for (i..n) |j| {
                 const r_distance = grid.distance(i, j);
-                weight_fns[0].ptr(i, j).* = hs.weightFnZeroth(r_distance);
-                weight_fns[1].ptr(i, j).* = hs.weightFnFirst(r_distance);
-                weight_fns[2].ptr(i, j).* = hs.weightFnSecond(r_distance);
+                weight_fns[0].ptr(i, j).* = hs.weightFn0(r_distance);
+                weight_fns[1].ptr(i, j).* = hs.weightFn1(r_distance);
+                weight_fns[2].ptr(i, j).* = hs.weightFn2(r_distance);
             }
         }
 
@@ -160,9 +160,9 @@ test "HardSphereKernel init" {
     defer kernel.deinit();
 
     // Check that the weight functions are initialized correctly
-    try t.expect(kernel.weight_fns[0].at(0, 1) == hs.weightFnZeroth(grid.distance(0, 1)));
-    try t.expect(kernel.weight_fns[1].at(0, 1) == hs.weightFnFirst(grid.distance(0, 1)));
-    try t.expect(kernel.weight_fns[2].at(0, 1) == hs.weightFnSecond(grid.distance(0, 1)));
+    try t.expect(kernel.weight_fns[0].at(0, 1) == hs.weightFn0(grid.distance(0, 1)));
+    try t.expect(kernel.weight_fns[1].at(0, 1) == hs.weightFn1(grid.distance(0, 1)));
+    try t.expect(kernel.weight_fns[2].at(0, 1) == hs.weightFn2(grid.distance(0, 1)));
 }
 
 pub const HardSphereWorkspace = struct {
@@ -236,7 +236,6 @@ pub const HardSphereWorkspace = struct {
                 self.allocator.free(self.weighted_density_expansions[i]);
             }
 
-            // Free Fourier-transformed weights
             for (0..3) |i| {
                 self.allocator.free(self.weight_fns_fourier[i]);
             }
