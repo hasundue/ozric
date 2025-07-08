@@ -44,6 +44,11 @@ pub const Grid = struct {
     pub fn getFftSize(self: Self) usize {
         return util.nextPowerOfTwo(2 * self.points.len);
     }
+
+    /// Get distance between two grid points by their indices
+    pub fn distance(self: Self, i: usize, j: usize) f64 {
+        return @abs(self.points[i] - self.points[j]);
+    }
 };
 
 test "Grid init" {
@@ -70,4 +75,14 @@ test "Grid FFT size" {
     defer grid.deinit();
 
     try t.expectEqual(@as(usize, 32), grid.getFftSize());
+}
+
+test "Grid distance" {
+    var grid = try Grid.init(t.allocator, 10, 5.0);
+    defer grid.deinit();
+
+    try t.expectEqual(@as(f64, 0.0), grid.distance(0, 0));
+    try t.expectEqual(@as(f64, 0.5), grid.distance(0, 1));
+    try t.expectEqual(@as(f64, 0.5), grid.distance(1, 0));
+    try t.expectEqual(@as(f64, 4.5), grid.distance(0, 9));
 }

@@ -96,7 +96,7 @@ test "HardSphereDFT weightFunctionFirst" {
 
 pub const HardSphereKernel = struct {
     /// The expansion coefficients of density-independent weights over the grid
-    /// combinations, or weight_functions(|r - r'|) - 3 matrices of size N×N
+    /// combinations, or w_i(|r - r'|)
     weight_functions: [3][][]f64,
 
     /// Reference to the grid
@@ -145,7 +145,7 @@ pub const HardSphereKernel = struct {
         // Compute weights for upper triangle (i <= j)
         for (0..n) |i| {
             for (i..n) |j| {
-                const r_distance = @abs(self.grid.points[i] - self.grid.points[j]);
+                const r_distance = self.grid.distance(i, j);
                 self.weight_functions[0][i][j] = self.hs.weightFunctionZeroth(r_distance);
                 self.weight_functions[1][i][j] = self.hs.weightFunctionFirst(r_distance);
                 self.weight_functions[2][i][j] = self.hs.weightFunctionSecond(r_distance);
