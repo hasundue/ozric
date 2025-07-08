@@ -1,8 +1,9 @@
 const std = @import("std");
 const math = std.math;
 const t = std.testing;
-const grid_mod = @import("grid.zig");
-const Grid = grid_mod.Grid;
+
+const Grid = @import("grid.zig").Grid;
+const Matrix = @import("matrix.zig").Matrix;
 
 pub const HardSphereDFT = struct {
     /// Hard-sphere diameter
@@ -94,7 +95,7 @@ test "HardSphereDFT weightFnFirst" {
 pub const HardSphereKernel = struct {
     /// The expansion coefficients of density-independent weights over the grid
     /// combinations, or w_i(|r - r'|)
-    weight_fns: [3][][]f64,
+    weight_fns: [3]Matrix,
 
     /// Reference to the grid
     grid: Grid,
@@ -109,27 +110,28 @@ pub const HardSphereKernel = struct {
 
     pub fn init(allocator: std.mem.Allocator, grid: Grid, hs: HardSphereDFT) !Self {
         const n = grid.points.len;
-        var weight_fns: [3][][]f64 = undefined;
+        var weight_fns: [3]Matrix = undefined;
 
         for (0..3) |i| {
-            weight_fns[i] = try allocator.alloc([]f64, n);
-            for (0..n) |j| {
-                weight_fns[i][j] = try allocator.alloc(f64, n);
-            }
+            weight_fns[i] = try Matrix.init(allocator, n, n);
         }
+
+        // Fill in the upper triangle of the matrices
         for (0..n) |i| {
             for (i..n) |j| {
                 const r_distance = grid.distance(i, j);
-                weight_fns[0][i][j] = hs.weightFnZeroth(r_distance);
-                weight_fns[1][i][j] = hs.weightFnFirst(r_distance);
-                weight_fns[2][i][j] = hs.weightFnSecond(r_distance);
+                weight_fns[0].ptr(i, j).* = hs.weightFnZeroth(r_distance);
+                weight_fns[1].ptr(i, j).* = hs.weightFnFirst(r_distance);
+                weight_fns[2].ptr(i, j).* = hs.weightFnSecond(r_distance);
             }
         }
+
+        // Fill in the lower triangle of the matrices by symmetry
         for (0..n) |i| {
             for (0..i) |j| {
-                weight_fns[0][i][j] = weight_fns[0][j][i];
-                weight_fns[1][i][j] = weight_fns[1][j][i];
-                weight_fns[2][i][j] = weight_fns[2][j][i];
+                for (0..3) |k| {
+                    weight_fns[k].ptr(i, j).* = weight_fns[k].at(j, i);
+                }
             }
         }
 
@@ -144,10 +146,7 @@ pub const HardSphereKernel = struct {
     pub fn deinit(self: *Self) void {
         // Free weight matrices
         for (0..3) |i| {
-            for (0..self.grid.points.len) |j| {
-                self.allocator.free(self.weight_fns[i][j]);
-            }
-            self.allocator.free(self.weight_fns[i]);
+            self.weight_fns[i].deinit(self.allocator);
         }
     }
 };
@@ -161,9 +160,9 @@ test "HardSphereKernel init" {
     defer kernel.deinit();
 
     // Check that the weight functions are initialized correctly
-    try t.expect(kernel.weight_fns[0][0][1] == hs.weightFnZeroth(grid.distance(0, 1)));
-    try t.expect(kernel.weight_fns[1][0][1] == hs.weightFnFirst(grid.distance(0, 1)));
-    try t.expect(kernel.weight_fns[2][0][1] == hs.weightFnSecond(grid.distance(0, 1)));
+    try t.expect(kernel.weight_fns[0].at(0, 1) == hs.weightFnZeroth(grid.distance(0, 1)));
+    try t.expect(kernel.weight_fns[1].at(0, 1) == hs.weightFnFirst(grid.distance(0, 1)));
+    try t.expect(kernel.weight_fns[2].at(0, 1) == hs.weightFnSecond(grid.distance(0, 1)));
 }
 
 pub const HardSphereWorkspace = struct {
