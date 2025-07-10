@@ -40,23 +40,63 @@ pub const Weights = struct {
     ) !Weights {
         const n = data.len;
         if (n < 3) return error.InsufficientPoints;
-        if ((n - 1) % 2 != 0) return error.OddIntervals; // n-1 intervals must be even
 
-        // Simpson's rule coefficients: [1, 4, 2, 4, 2, ..., 4, 1] * h/3
-        data[0] = h / 3.0;
-        data[n - 1] = h / 3.0;
+        // Initialize all weights to zero
+        @memset(data, 0.0);
 
-        for (1..n - 1) |i| {
-            const coefficient: f64 = if (i % 2 == 1) 4.0 else 2.0;
-            data[i] = coefficient * h / 3.0;
-        }
-
-        // Handle kinks (discontinuities) by doubling the weight at kink points
         if (kinks) |kink_indices| {
+            // Create chunks separated by kinks
+            var chunks = std.ArrayList([2]usize).init(std.heap.page_allocator);
+            defer chunks.deinit();
+
+            // First chunk starts at 0
+            var chunk_start: usize = 0;
+
+            // Add chunks for each kink
             for (kink_indices) |kink_idx| {
-                if (kink_idx < n) {
-                    data[kink_idx] *= 2.0;
+                if (kink_idx > chunk_start and kink_idx < n) {
+                    try chunks.append(.{ chunk_start, kink_idx });
+                    chunk_start = kink_idx;
                 }
+            }
+
+            // Add final chunk
+            if (chunk_start < n - 1) {
+                try chunks.append(.{ chunk_start, n - 1 });
+            }
+
+            // Apply Simpson's rule to each chunk
+            for (chunks.items) |chunk| {
+                const start = chunk[0];
+                const end = chunk[1];
+                const chunk_len = end - start + 1;
+
+                if (chunk_len < 3) continue; // Skip chunks too small for Simpson's rule
+
+                // Check if chunk has even number of intervals (odd number of points)
+                const intervals = chunk_len - 1;
+                if (intervals % 2 != 0) continue; // Skip chunks with odd intervals
+
+                // Apply Simpson's rule: [1, 4, 2, 4, 2, ..., 4, 1] * h/3
+                data[start] += h / 3.0;
+                data[end] += h / 3.0;
+
+                for (start + 1..end) |i| {
+                    const offset_in_chunk = i - start;
+                    const coefficient: f64 = if (offset_in_chunk % 2 == 1) 4.0 else 2.0;
+                    data[i] += coefficient * h / 3.0;
+                }
+            }
+        } else {
+            // No kinks - standard Simpson's rule
+            if ((n - 1) % 2 != 0) return error.OddIntervals; // n-1 intervals must be even
+
+            data[0] = h / 3.0;
+            data[n - 1] = h / 3.0;
+
+            for (1..n - 1) |i| {
+                const coefficient: f64 = if (i % 2 == 1) 4.0 else 2.0;
+                data[i] = coefficient * h / 3.0;
             }
         }
 
@@ -341,15 +381,52 @@ test "Simpson weights with kinks" {
     const allocator = testing.allocator;
     const eqa = testing.expectApproxEqAbs;
 
-    // Test Simpson weights with a kink at index 1
-    const kink_indices = [_]usize{1};
-    var weights = try Weights.init(.simpson, allocator, 3, 0.1, &kink_indices);
+    // Test Simpson weights with a kink at index 2 (separating into two chunks)
+    // Array: [0, 1, 2, 3, 4] with kink at index 2
+    // Chunk 1: [0, 1, 2] -> Simpson: [1, 4, 1] * (0.1/3)
+    // Chunk 2: [2, 3, 4] -> Simpson: [1, 4, 1] * (0.1/3)
+    // Result: [0.1/3, 4*0.1/3, 2*0.1/3, 4*0.1/3, 0.1/3]
+    //         (index 2 gets weight from both chunks)
+    const kink_indices = [_]usize{2};
+    var weights = try Weights.init(.simpson, allocator, 5, 0.1, &kink_indices);
     defer weights.deinit(allocator);
 
-    // Expected pattern: [1, 4, 1] * (0.1/3) with kink at index 1 doubled
-    // So: [0.1/3, 8 * 0.1/3, 0.1/3]
-    const expected = [_]f64{ 0.1 / 3.0, 8.0 * 0.1 / 3.0, 0.1 / 3.0 };
-    try testing.expectEqual(3, weights.data.len);
+    const expected = [_]f64{
+        0.1 / 3.0, // start of chunk 1
+        4.0 * 0.1 / 3.0, // middle of chunk 1
+        2.0 * 0.1 / 3.0, // end of chunk 1 + start of chunk 2
+        4.0 * 0.1 / 3.0, // middle of chunk 2
+        0.1 / 3.0, // end of chunk 2
+    };
+    try testing.expectEqual(5, weights.data.len);
+    for (expected, weights.data) |exp, actual| {
+        try eqa(exp, actual, 1e-10);
+    }
+}
+
+test "Simpson weights with multiple kinks" {
+    const allocator = testing.allocator;
+    const eqa = testing.expectApproxEqAbs;
+
+    // Test with 7 points and kinks at indices 2 and 4
+    // Array: [0, 1, 2, 3, 4, 5, 6] with kinks at indices 2 and 4
+    // Chunk 1: [0, 1, 2] -> Simpson: [1, 4, 1] * (0.1/3)
+    // Chunk 2: [2, 3, 4] -> Simpson: [1, 4, 1] * (0.1/3)
+    // Chunk 3: [4, 5, 6] -> Simpson: [1, 4, 1] * (0.1/3)
+    const kink_indices = [_]usize{ 2, 4 };
+    var weights = try Weights.init(.simpson, allocator, 7, 0.1, &kink_indices);
+    defer weights.deinit(allocator);
+
+    const expected = [_]f64{
+        0.1 / 3.0, // start of chunk 1
+        4.0 * 0.1 / 3.0, // middle of chunk 1
+        2.0 * 0.1 / 3.0, // end of chunk 1 + start of chunk 2
+        4.0 * 0.1 / 3.0, // middle of chunk 2
+        2.0 * 0.1 / 3.0, // end of chunk 2 + start of chunk 3
+        4.0 * 0.1 / 3.0, // middle of chunk 3
+        0.1 / 3.0, // end of chunk 3
+    };
+    try testing.expectEqual(7, weights.data.len);
     for (expected, weights.data) |exp, actual| {
         try eqa(exp, actual, 1e-10);
     }
