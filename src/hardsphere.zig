@@ -164,7 +164,9 @@ pub const HardSphereKernels = struct {
                 kernel_values[offset] = weight_fn.ptr(hs, distance);
             }
 
-            weight_kernels[k] = try conv.Kernel.init(allocator, kernel_values, n);
+            const rect_weights = try conv.Weights.init(.rectangular, allocator, kernel_values.len, 0.1);
+            defer rect_weights.deinit(allocator);
+            weight_kernels[k] = try conv.Kernel.init(allocator, kernel_values, n, rect_weights);
         }
 
         return Self{

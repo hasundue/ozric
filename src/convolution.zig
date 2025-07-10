@@ -6,7 +6,7 @@ const dsbmv = @import("linear/dsbmv.zig");
 const sb = @import("linear/sb.zig");
 
 pub const WeightRule = enum {
-    // .Trapezoidal, // Trapezoidal rule weights (not implemented)
+    rectangular, // Uniform weights (all 1.0)
     simpson, // Simpson's rule weights
 };
 
@@ -21,28 +21,70 @@ pub const Weights = struct {
         n: usize,
         h: f64,
     ) !Weights {
-        var data = try allocator.alloc(f64, n);
+        const data = try allocator.alloc(f64, n);
 
         if (rule == .simpson) {
-            return try initSimpsonWeights(allocator, &data, h);
+            return try initSimpsonWeights(data, h);
+        } else if (rule == .rectangular) {
+            return try initRectangularWeights(data);
         } else {
             unreachable;
         }
     }
 
     fn initSimpsonWeights(
-        allocator: Allocator,
-        data: *[]f64,
+        data: []f64,
         h: f64,
-    ) !Weights {}
-
-    pub fn concat(
-        self: Self,
-        other: Weights,
     ) !Weights {
-        // concat two Weights at a shared discontinuity point
+        const n = data.len;
+        if (n < 3) return error.InsufficientPoints;
+        if ((n - 1) % 2 != 0) return error.OddIntervals; // n-1 intervals must be even
+
+        // Simpson's rule coefficients: [1, 4, 2, 4, 2, ..., 4, 1] * h/3
+        data[0] = h / 3.0;
+        data[n - 1] = h / 3.0;
+
+        for (1..n - 1) |i| {
+            const coefficient: f64 = if (i % 2 == 1) 4.0 else 2.0;
+            data[i] = coefficient * h / 3.0;
+        }
+
+        return Weights{ .data = data };
+    }
+
+    fn initRectangularWeights(data: []f64) !Weights {
+        // Uniform weights (all 1.0) for rectangular rule
+        @memset(data, 1.0);
+        return Weights{ .data = data };
+    }
+
+    pub fn deinit(self: Self, allocator: Allocator) void {
+        allocator.free(self.data);
     }
 };
+
+pub fn join(
+    allocator: Allocator,
+    a: Weights,
+    b: Weights,
+) !Weights {
+    // concat two Weights at a shared discontinuity point
+    // The last point of self and first point of other are at the same location (discontinuity)
+    // So we add them together and create a new combined weight array
+    const combined_len = a.data.len + b.data.len - 1;
+    var combined_data = try allocator.alloc(f64, combined_len);
+
+    // Copy first weight array
+    @memcpy(combined_data[0..a.data.len], a.data);
+
+    // Add the overlapping point (discontinuity gets double weight)
+    combined_data[a.data.len - 1] += b.data[0];
+
+    // Copy the rest of the second weight array
+    @memcpy(combined_data[a.data.len..], b.data[1..]);
+
+    return Weights{ .data = combined_data };
+}
 
 /// Convolution kernel for symmetric band matrix operations
 pub const Kernel = struct {
@@ -51,24 +93,25 @@ pub const Kernel = struct {
 
     const Self = @This();
 
-    /// Initialize a convolution kernel and create its symmetric band matrix
+    /// Initialize a convolution kernel with integration weights applied
     /// kernel_values contains only half spectrum (center + positive offsets)
+    /// weights are applied element-wise to the kernel values
     pub fn init(
         allocator: Allocator,
         kernel_values: []const f64,
         signal_size: usize,
+        weights: Weights,
     ) !Self {
         const radius = kernel_values.len - 1;
         var matrix = try sb.SymmetricBandMatrix.init(allocator, signal_size, radius);
         matrix.clear();
 
-        // Construct band matrix from symmetric kernel
+        // Apply weights to kernel values and construct band matrix
         for (0..signal_size) |i| {
             for (0..@min(radius + 1, signal_size - i)) |offset| {
                 const j = i + offset;
-                if (j < signal_size and offset < kernel_values.len) {
-                    matrix.set(i, j, kernel_values[offset]);
-                }
+                const weighted_value = kernel_values[offset] * weights.data[offset];
+                matrix.set(i, j, weighted_value);
             }
         }
 
@@ -81,11 +124,9 @@ pub const Kernel = struct {
     /// Perform convolution with the kernel
     pub fn convolve(
         self: *const Self,
-        weights: Weights,
         signal: []const f64,
         result: []f64,
     ) void {
-        // TODO: do result = self x weights here
         dsbmv.dsbmv(.U, self.matrix.n, self.matrix.k, 1.0, self.matrix.data, self.matrix.lda, signal, 1, 0.0, result, 1);
     }
 
@@ -122,7 +163,9 @@ pub fn benchmark_convolution(allocator: Allocator) !void {
         }
 
         // Create kernel and execute benchmark
-        var kernel_obj = try Kernel.init(allocator, kernel, size);
+        const rect_weights = try Weights.init(.rectangular, allocator, kernel.len, 0.1);
+        defer rect_weights.deinit(allocator);
+        var kernel_obj = try Kernel.init(allocator, kernel, size, rect_weights);
         defer kernel_obj.deinit(allocator);
 
         const start_time = std.time.nanoTimestamp();
@@ -147,7 +190,9 @@ test "convolution test" {
     defer allocator.free(result);
 
     // Create kernel
-    var kernel_obj = try Kernel.init(allocator, &kernel, signal.len);
+    const rect_weights = try Weights.init(.rectangular, allocator, kernel.len, 0.1);
+    defer rect_weights.deinit(allocator);
+    var kernel_obj = try Kernel.init(allocator, &kernel, signal.len, rect_weights);
     defer kernel_obj.deinit(allocator);
 
     kernel_obj.convolve(&signal, result);
@@ -179,7 +224,9 @@ test "kernel comparison" {
 
     // First convolution with smoothing kernel
     {
-        var kernel_obj = try Kernel.init(allocator, &kernel1, signal.len);
+        const rect_weights1 = try Weights.init(.rectangular, allocator, kernel1.len, 0.1);
+        defer rect_weights1.deinit(allocator);
+        var kernel_obj = try Kernel.init(allocator, &kernel1, signal.len, rect_weights1);
         defer kernel_obj.deinit(allocator);
         kernel_obj.convolve(&signal, result);
         const expected_smooth = [_]f64{ 1.0, 2.0, 3.0, 4.0, 3.5 };
@@ -188,7 +235,9 @@ test "kernel comparison" {
 
     // Second convolution with identity kernel (should return original signal)
     {
-        var kernel_obj = try Kernel.init(allocator, &kernel2, signal.len);
+        const rect_weights2 = try Weights.init(.rectangular, allocator, kernel2.len, 0.1);
+        defer rect_weights2.deinit(allocator);
+        var kernel_obj = try Kernel.init(allocator, &kernel2, signal.len, rect_weights2);
         defer kernel_obj.deinit(allocator);
         kernel_obj.convolve(&signal, result);
         try testing.expectEqualSlices(f64, &signal, result);
@@ -202,7 +251,9 @@ test "convolution matrix creation" {
     const kernel = [_]f64{ 0.5, 0.25 };
     const signal_size = 5;
 
-    var kernel_obj = try Kernel.init(allocator, &kernel, signal_size);
+    const rect_weights = try Weights.init(.rectangular, allocator, kernel.len, 0.1);
+    defer rect_weights.deinit(allocator);
+    var kernel_obj = try Kernel.init(allocator, &kernel, signal_size, rect_weights);
     defer kernel_obj.deinit(allocator);
 
     // Check that the kernel values are properly stored
@@ -211,4 +262,66 @@ test "convolution matrix creation" {
     for (test_positions, expected_values) |pos, expected| {
         try eqa(expected, kernel_obj.matrix.get(pos[0], pos[1]), 1e-10);
     }
+}
+
+test "Simpson weights" {
+    const allocator = testing.allocator;
+    const eqa = testing.expectApproxEqAbs;
+
+    // Test Simpson weights for 5 points (4 intervals)
+    var weights = try Weights.init(.simpson, allocator, 5, 0.1);
+    defer weights.deinit(allocator);
+
+    // Expected pattern: [1, 4, 2, 4, 1] * (0.1/3)
+    const expected = [_]f64{ 0.1 / 3.0, 4 * 0.1 / 3.0, 2 * 0.1 / 3.0, 4 * 0.1 / 3.0, 0.1 / 3.0 };
+    try testing.expectEqual(5, weights.data.len);
+    for (expected, weights.data) |exp, actual| {
+        try eqa(exp, actual, 1e-10);
+    }
+}
+
+test "Weights join" {
+    const allocator = testing.allocator;
+    const eqa = testing.expectApproxEqAbs;
+
+    // Create two weight arrays that should be concatenated at a discontinuity
+    var weights1 = try Weights.init(.simpson, allocator, 3, 0.1);
+    var weights2 = try Weights.init(.simpson, allocator, 3, 0.1);
+
+    // Join them
+    var combined = try join(allocator, weights1, weights2);
+    defer combined.deinit(allocator);
+    defer weights1.deinit(allocator);
+    defer weights2.deinit(allocator);
+
+    // Should have 5 elements (3 + 3 - 1)
+    try testing.expectEqual(5, combined.data.len);
+
+    // Middle element should be sum of overlapping weights
+    const expected_middle = weights1.data[2] + weights2.data[0];
+    try eqa(expected_middle, combined.data[2], 1e-10);
+}
+
+test "Kernel with weights" {
+    const allocator = testing.allocator;
+    const eqa = testing.expectApproxEqAbs;
+
+    // Create kernel values and weights (Simpson needs at least 3 points)
+    const kernel_values = [_]f64{ 1.0, 0.5, 0.25 };
+    var weights = try Weights.init(.simpson, allocator, 3, 0.1);
+    defer weights.deinit(allocator);
+
+    // Create kernel with weights applied
+    var kernel = try Kernel.init(allocator, &kernel_values, 4, weights);
+    defer kernel.deinit(allocator);
+
+    // Check that weights were applied to kernel values
+    // Simpson weights for 3 points: [1, 4, 1] * (0.1/3) = [0.1/3, 0.4/3, 0.1/3]
+    const expected_center = kernel_values[0] * weights.data[0];
+    const expected_offset1 = kernel_values[1] * weights.data[1];
+    const expected_offset2 = kernel_values[2] * weights.data[2];
+
+    try eqa(expected_center, kernel.matrix.get(0, 0), 1e-10);
+    try eqa(expected_offset1, kernel.matrix.get(0, 1), 1e-10);
+    try eqa(expected_offset2, kernel.matrix.get(0, 2), 1e-10);
 }
