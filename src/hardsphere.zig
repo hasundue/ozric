@@ -6,6 +6,13 @@ const conv = @import("convolution.zig");
 const Grid = @import("grid.zig").Grid;
 const Matrix = @import("matrix.zig").Matrix;
 
+/// Weight function with its theoretical radius
+pub const WeightFunction = struct {
+    ptr: *const fn (HardSphereDFT, f64) f64,
+    /// Theoretical radius in units of hard sphere diameter
+    radius_factor: f64,
+};
+
 pub const HardSphereDFT = struct {
     /// Hard-sphere diameter
     diameter: f64,
@@ -18,12 +25,13 @@ pub const HardSphereDFT = struct {
         };
     }
 
-    /// Array of weight functions: [weightFn0, weightFn1c, weightFn1t, weightFn2]
-    pub const weightFns = [_]*const fn (Self, f64) f64{
-        weightFn0,
-        weightFn1core,
-        weightFn1tail,
-        weightFn2,
+    /// Array of weight functions with their theoretical radii
+    /// [weightFn0, weightFn1core, weightFn1tail, weightFn2]
+    pub const weightFunctions = [_]WeightFunction{
+        .{ .ptr = weightFn0, .radius_factor = 1.0 }, // cutoff at diameter
+        .{ .ptr = weightFn1core, .radius_factor = 1.0 }, // core function, cutoff at diameter
+        .{ .ptr = weightFn1tail, .radius_factor = 5.0 }, // tail function, extends to ~5 diameters
+        .{ .ptr = weightFn2, .radius_factor = 1.0 }, // cutoff at diameter
     };
 
     pub fn weightFn0(self: Self, r: f64) f64 {
@@ -138,19 +146,21 @@ pub const HardSphereKernels = struct {
         const n = grid.points.len;
         var weight_kernels: [4]conv.Kernel = undefined;
 
-        // For a radially symmetric function on a uniform grid, we need to determine
-        // the maximum radius and create kernel values for each distance
-        const max_radius = @min(n - 1, n / 2); // Reasonable cutoff for kernel radius
-
         for (0..4) |k| {
+            const weight_fn = HardSphereDFT.weightFunctions[k];
+
+            // Calculate theoretical radius in grid points
+            const theoretical_radius = weight_fn.radius_factor * hs.diameter;
+            const radius_grid_points = @min(@as(usize, @intFromFloat(@ceil(theoretical_radius / grid.spacing))), n - 1);
+
             // Create kernel values array for half spectrum [center, offset1, offset2, ...]
-            var kernel_values = try allocator.alloc(f64, max_radius + 1);
+            var kernel_values = try allocator.alloc(f64, radius_grid_points + 1);
             defer allocator.free(kernel_values);
 
             // Fill kernel values based on grid distances
-            for (0..max_radius + 1) |offset| {
+            for (0..radius_grid_points + 1) |offset| {
                 const distance = grid.spacing * @as(f64, @floatFromInt(offset));
-                kernel_values[offset] = HardSphereDFT.weightFns[k](hs, distance);
+                kernel_values[offset] = weight_fn.ptr(hs, distance);
             }
 
             weight_kernels[k] = try conv.Kernel.init(allocator, kernel_values, n);
@@ -184,7 +194,7 @@ test "HardSphereKernel init" {
     // Test kernel matrix values at specific positions
     const d01 = grid.distance(0, 1);
     for (0..4) |i| {
-        const expected = HardSphereDFT.weightFns[i](hs, d01);
+        const expected = HardSphereDFT.weightFunctions[i].ptr(hs, d01);
         const actual = kernel.weights[i].matrix.get(0, 1);
         try t.expectApproxEqAbs(expected, actual, 1e-10);
     }
