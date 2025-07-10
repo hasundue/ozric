@@ -18,6 +18,14 @@ pub const HardSphereDFT = struct {
         };
     }
 
+    /// Array of weight functions: [weightFn0, weightFn1c, weightFn1t, weightFn2]
+    pub const weightFns = [_]*const fn (Self, f64) f64{
+        weightFn0,
+        weightFn1core,
+        weightFn1tail,
+        weightFn2,
+    };
+
     pub fn weightFn0(self: Self, r: f64) f64 {
         if (r > self.diameter) return 0.0;
 
@@ -27,16 +35,16 @@ pub const HardSphereDFT = struct {
         return 3 / (4 * pi * sigma3);
     }
 
-    pub fn weightFn1(self: Self, r: f64) f64 {
-        if (r < self.diameter) {
-            return self.weightFn1c(r);
+    pub fn weightFn1(hs: HardSphereDFT, r: f64) f64 {
+        if (r < hs.diameter) {
+            return hs.weightFn1core(r);
         } else {
-            return self.weightFn1t(r);
+            return hs.weightFn1tail(r);
         }
     }
 
     // The first order weight function inside the hard sphere
-    pub fn weightFn1c(self: Self, r: f64) f64 {
+    pub fn weightFn1core(self: Self, r: f64) f64 {
         if (r > self.diameter) return 0.0;
 
         const x = r / self.diameter;
@@ -50,7 +58,7 @@ pub const HardSphereDFT = struct {
     }
 
     /// The second order weight function outside the hard sphere
-    pub fn weightFn1t(self: Self, r: f64) f64 {
+    pub fn weightFn1tail(self: Self, r: f64) f64 {
         if (r < self.diameter) return 0.0;
 
         const x = r / self.diameter;
@@ -142,13 +150,7 @@ pub const HardSphereKernels = struct {
             // Fill kernel values based on grid distances
             for (0..max_radius + 1) |offset| {
                 const distance = grid.spacing * @as(f64, @floatFromInt(offset));
-                kernel_values[offset] = switch (k) {
-                    0 => hs.weightFn0(distance),
-                    1 => hs.weightFn1c(distance),
-                    2 => hs.weightFn1t(distance),
-                    3 => hs.weightFn2(distance),
-                    else => unreachable,
-                };
+                kernel_values[offset] = HardSphereDFT.weightFns[k](hs, distance);
             }
 
             weight_kernels[k] = try conv.Kernel.init(allocator, kernel_values, n);
@@ -181,10 +183,11 @@ test "HardSphereKernel init" {
     // Check that the weight functions are initialized correctly
     // Test kernel matrix values at specific positions
     const d01 = grid.distance(0, 1);
-    try t.expectApproxEqAbs(hs.weightFn0(d01), kernel.weights[0].matrix.get(0, 1), 1e-10);
-    try t.expectApproxEqAbs(hs.weightFn1c(d01), kernel.weights[1].matrix.get(0, 1), 1e-10);
-    try t.expectApproxEqAbs(hs.weightFn1t(d01), kernel.weights[2].matrix.get(0, 1), 1e-10);
-    try t.expectApproxEqAbs(hs.weightFn2(d01), kernel.weights[3].matrix.get(0, 1), 1e-10);
+    for (0..4) |i| {
+        const expected = HardSphereDFT.weightFns[i](hs, d01);
+        const actual = kernel.weights[i].matrix.get(0, 1);
+        try t.expectApproxEqAbs(expected, actual, 1e-10);
+    }
 }
 
 pub const HardSphereWorkspace = struct {
