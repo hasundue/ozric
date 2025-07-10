@@ -26,12 +26,13 @@ pub const HardSphereDFT = struct {
     }
 
     /// Get weight functions with precalculated physical radii
+    /// Ordered for easy mapping: [weightFn0, weightFn2, weightFn1core, weightFn1tail]
     pub fn getWeightFunctions(self: Self) [4]WeightFunction {
         return [_]WeightFunction{
-            .{ .ptr = weightFn0, .radius = 1.0 * self.diameter }, // cutoff at diameter
-            .{ .ptr = weightFn1core, .radius = 1.0 * self.diameter }, // core function, cutoff at diameter
-            .{ .ptr = weightFn1tail, .radius = 5.0 * self.diameter }, // tail function, extends to ~5 diameters
-            .{ .ptr = weightFn2, .radius = 1.0 * self.diameter }, // cutoff at diameter
+            .{ .ptr = weightFn0, .radius = 1.0 * self.diameter }, // [0]
+            .{ .ptr = weightFn2, .radius = 1.0 * self.diameter }, // [1]
+            .{ .ptr = weightFn1core, .radius = 1.0 * self.diameter }, // [2] core
+            .{ .ptr = weightFn1tail, .radius = 5.0 * self.diameter }, // [3] tail
         };
     }
 
@@ -165,72 +166,57 @@ pub const HardSphereKernels = struct {
         defer for (0..4) |k| simpson_weights[k].deinit(allocator);
 
         // Step 3: Create the three kernels
-        for (0..3) |i| {
-            switch (i) {
-                0 => {
-                    // weightFn0
-                    const k = 0;
-                    const weight_fn = weight_functions[k];
+        // weightFn0 (i=0)
+        {
+            const weight_fn = weight_functions[0];
+            const radius_grid_points = @min(@as(usize, @intFromFloat(@ceil(weight_fn.radius / grid.spacing))), n - 1);
 
-                    // Calculate radius in grid points
-                    const radius_grid_points = @min(@as(usize, @intFromFloat(@ceil(weight_fn.radius / grid.spacing))), n - 1);
+            var kernel_values = try allocator.alloc(f64, radius_grid_points + 1);
+            defer allocator.free(kernel_values);
 
-                    // Create kernel values array for half spectrum [center, offset1, offset2, ...]
-                    var kernel_values = try allocator.alloc(f64, radius_grid_points + 1);
-                    defer allocator.free(kernel_values);
-
-                    // Fill kernel values based on grid distances
-                    for (0..radius_grid_points + 1) |offset| {
-                        const distance = grid.spacing * @as(f64, @floatFromInt(offset));
-                        kernel_values[offset] = weight_fn.ptr(hs, distance);
-                    }
-
-                    weight_kernels[i] = try conv.Kernel.init(allocator, kernel_values, n, simpson_weights[k]);
-                },
-                1 => {
-                    // For weightFn1, join core (k=1) and tail (k=2) weights
-                    const joined_weights = try conv.join(allocator, simpson_weights[1], simpson_weights[2]);
-                    defer joined_weights.deinit(allocator);
-
-                    // Create unified kernel values for weightFn1 (core + tail)
-                    const core_fn = weight_functions[1]; // weightFn1core
-                    const tail_fn = weight_functions[2]; // weightFn1tail
-                    const max_radius = @max(core_fn.radius, tail_fn.radius);
-                    const radius_grid_points = @min(@as(usize, @intFromFloat(@ceil(max_radius / grid.spacing))), n - 1);
-
-                    var unified_kernel_values = try allocator.alloc(f64, radius_grid_points + 1);
-                    defer allocator.free(unified_kernel_values);
-
-                    // Fill with unified weightFn1 values
-                    for (0..radius_grid_points + 1) |offset| {
-                        const distance = grid.spacing * @as(f64, @floatFromInt(offset));
-                        unified_kernel_values[offset] = hs.weightFn1(distance);
-                    }
-
-                    weight_kernels[i] = try conv.Kernel.init(allocator, unified_kernel_values, n, joined_weights);
-                },
-                2 => {
-                    // weightFn2
-                    const k = 3;
-                    const weight_fn = weight_functions[k];
-
-                    // Calculate radius in grid points
-                    const radius_grid_points = @min(@as(usize, @intFromFloat(@ceil(weight_fn.radius / grid.spacing))), n - 1);
-
-                    // Create kernel values array for half spectrum [center, offset1, offset2, ...]
-                    var kernel_values = try allocator.alloc(f64, radius_grid_points + 1);
-                    defer allocator.free(kernel_values);
-
-                    // Fill kernel values based on grid distances
-                    for (0..radius_grid_points + 1) |offset| {
-                        const distance = grid.spacing * @as(f64, @floatFromInt(offset));
-                        kernel_values[offset] = weight_fn.ptr(hs, distance);
-                    }
-
-                    weight_kernels[i] = try conv.Kernel.init(allocator, kernel_values, n, simpson_weights[k]);
-                },
-                else => unreachable,
+            for (0..radius_grid_points + 1) |offset| {
+                const distance = grid.spacing * @as(f64, @floatFromInt(offset));
+                kernel_values[offset] = weight_fn.ptr(hs, distance);
             }
+
+            weight_kernels[0] = try conv.Kernel.init(allocator, kernel_values, n, simpson_weights[0]);
+        }
+
+        // weightFn1 (unified) (i=1)
+        {
+            const joined_weights = try conv.join(allocator, simpson_weights[2], simpson_weights[3]);
+            defer joined_weights.deinit(allocator);
+
+            const core_fn = weight_functions[2]; // weightFn1core
+            const tail_fn = weight_functions[3]; // weightFn1tail
+            const max_radius = @max(core_fn.radius, tail_fn.radius);
+            const radius_grid_points = @min(@as(usize, @intFromFloat(@ceil(max_radius / grid.spacing))), n - 1);
+
+            var unified_kernel_values = try allocator.alloc(f64, radius_grid_points + 1);
+            defer allocator.free(unified_kernel_values);
+
+            for (0..radius_grid_points + 1) |offset| {
+                const distance = grid.spacing * @as(f64, @floatFromInt(offset));
+                unified_kernel_values[offset] = hs.weightFn1(distance);
+            }
+
+            weight_kernels[1] = try conv.Kernel.init(allocator, unified_kernel_values, n, joined_weights);
+        }
+
+        // weightFn2 (i=2)
+        {
+            const weight_fn = weight_functions[1]; // weight_functions[1] = weightFn2
+            const radius_grid_points = @min(@as(usize, @intFromFloat(@ceil(weight_fn.radius / grid.spacing))), n - 1);
+
+            var kernel_values = try allocator.alloc(f64, radius_grid_points + 1);
+            defer allocator.free(kernel_values);
+
+            for (0..radius_grid_points + 1) |offset| {
+                const distance = grid.spacing * @as(f64, @floatFromInt(offset));
+                kernel_values[offset] = weight_fn.ptr(hs, distance);
+            }
+
+            weight_kernels[2] = try conv.Kernel.init(allocator, kernel_values, n, simpson_weights[1]);
         }
 
         return Self{
