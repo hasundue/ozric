@@ -20,11 +20,12 @@ pub const Weights = struct {
         allocator: Allocator,
         n: usize,
         h: f64,
+        kinks: ?[]const usize,
     ) !Weights {
         const data = try allocator.alloc(f64, n);
 
         if (rule == .simpson) {
-            return try initSimpsonWeights(data, h);
+            return try initSimpsonWeights(data, h, kinks);
         } else if (rule == .rectangular) {
             return try initRectangularWeights(data);
         } else {
@@ -35,6 +36,7 @@ pub const Weights = struct {
     fn initSimpsonWeights(
         data: []f64,
         h: f64,
+        kinks: ?[]const usize,
     ) !Weights {
         const n = data.len;
         if (n < 3) return error.InsufficientPoints;
@@ -47,6 +49,15 @@ pub const Weights = struct {
         for (1..n - 1) |i| {
             const coefficient: f64 = if (i % 2 == 1) 4.0 else 2.0;
             data[i] = coefficient * h / 3.0;
+        }
+
+        // Handle kinks (discontinuities) by doubling the weight at kink points
+        if (kinks) |kink_indices| {
+            for (kink_indices) |kink_idx| {
+                if (kink_idx < n) {
+                    data[kink_idx] *= 2.0;
+                }
+            }
         }
 
         return Weights{ .data = data };
@@ -163,7 +174,7 @@ pub fn benchmark_convolution(allocator: Allocator) !void {
         }
 
         // Create kernel and execute benchmark
-        const rect_weights = try Weights.init(.rectangular, allocator, kernel.len, 0.1);
+        const rect_weights = try Weights.init(.rectangular, allocator, kernel.len, 0.1, null);
         defer rect_weights.deinit(allocator);
         var kernel_obj = try Kernel.init(allocator, kernel, size, rect_weights);
         defer kernel_obj.deinit(allocator);
@@ -190,7 +201,7 @@ test "convolution test" {
     defer allocator.free(result);
 
     // Create kernel
-    const rect_weights = try Weights.init(.rectangular, allocator, kernel.len, 0.1);
+    const rect_weights = try Weights.init(.rectangular, allocator, kernel.len, 0.1, null);
     defer rect_weights.deinit(allocator);
     var kernel_obj = try Kernel.init(allocator, &kernel, signal.len, rect_weights);
     defer kernel_obj.deinit(allocator);
@@ -224,7 +235,7 @@ test "kernel comparison" {
 
     // First convolution with smoothing kernel
     {
-        const rect_weights1 = try Weights.init(.rectangular, allocator, kernel1.len, 0.1);
+        const rect_weights1 = try Weights.init(.rectangular, allocator, kernel1.len, 0.1, null);
         defer rect_weights1.deinit(allocator);
         var kernel_obj = try Kernel.init(allocator, &kernel1, signal.len, rect_weights1);
         defer kernel_obj.deinit(allocator);
@@ -235,7 +246,7 @@ test "kernel comparison" {
 
     // Second convolution with identity kernel (should return original signal)
     {
-        const rect_weights2 = try Weights.init(.rectangular, allocator, kernel2.len, 0.1);
+        const rect_weights2 = try Weights.init(.rectangular, allocator, kernel2.len, 0.1, null);
         defer rect_weights2.deinit(allocator);
         var kernel_obj = try Kernel.init(allocator, &kernel2, signal.len, rect_weights2);
         defer kernel_obj.deinit(allocator);
@@ -251,7 +262,7 @@ test "convolution matrix creation" {
     const kernel = [_]f64{ 0.5, 0.25 };
     const signal_size = 5;
 
-    const rect_weights = try Weights.init(.rectangular, allocator, kernel.len, 0.1);
+    const rect_weights = try Weights.init(.rectangular, allocator, kernel.len, 0.1, null);
     defer rect_weights.deinit(allocator);
     var kernel_obj = try Kernel.init(allocator, &kernel, signal_size, rect_weights);
     defer kernel_obj.deinit(allocator);
@@ -269,7 +280,7 @@ test "Simpson weights" {
     const eqa = testing.expectApproxEqAbs;
 
     // Test Simpson weights for 5 points (4 intervals)
-    var weights = try Weights.init(.simpson, allocator, 5, 0.1);
+    var weights = try Weights.init(.simpson, allocator, 5, 0.1, null);
     defer weights.deinit(allocator);
 
     // Expected pattern: [1, 4, 2, 4, 1] * (0.1/3)
@@ -285,8 +296,8 @@ test "Weights join" {
     const eqa = testing.expectApproxEqAbs;
 
     // Create two weight arrays that should be concatenated at a discontinuity
-    var weights1 = try Weights.init(.simpson, allocator, 3, 0.1);
-    var weights2 = try Weights.init(.simpson, allocator, 3, 0.1);
+    var weights1 = try Weights.init(.simpson, allocator, 3, 0.1, null);
+    var weights2 = try Weights.init(.simpson, allocator, 3, 0.1, null);
 
     // Join them
     var combined = try join(allocator, weights1, weights2);
@@ -308,7 +319,7 @@ test "Kernel with weights" {
 
     // Create kernel values and weights (Simpson needs at least 3 points)
     const kernel_values = [_]f64{ 1.0, 0.5, 0.25 };
-    var weights = try Weights.init(.simpson, allocator, 3, 0.1);
+    var weights = try Weights.init(.simpson, allocator, 3, 0.1, null);
     defer weights.deinit(allocator);
 
     // Create kernel with weights applied
@@ -324,4 +335,22 @@ test "Kernel with weights" {
     try eqa(expected_center, kernel.matrix.get(0, 0), 1e-10);
     try eqa(expected_offset1, kernel.matrix.get(0, 1), 1e-10);
     try eqa(expected_offset2, kernel.matrix.get(0, 2), 1e-10);
+}
+
+test "Simpson weights with kinks" {
+    const allocator = testing.allocator;
+    const eqa = testing.expectApproxEqAbs;
+
+    // Test Simpson weights with a kink at index 1
+    const kink_indices = [_]usize{1};
+    var weights = try Weights.init(.simpson, allocator, 3, 0.1, &kink_indices);
+    defer weights.deinit(allocator);
+
+    // Expected pattern: [1, 4, 1] * (0.1/3) with kink at index 1 doubled
+    // So: [0.1/3, 8 * 0.1/3, 0.1/3]
+    const expected = [_]f64{ 0.1 / 3.0, 8.0 * 0.1 / 3.0, 0.1 / 3.0 };
+    try testing.expectEqual(3, weights.data.len);
+    for (expected, weights.data) |exp, actual| {
+        try eqa(exp, actual, 1e-10);
+    }
 }

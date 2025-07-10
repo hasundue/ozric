@@ -153,25 +153,36 @@ pub const HardSphereKernel = struct {
         var kernels: [3]conv.Kernel = undefined;
         const weight_fns = hs.getWeightFns();
 
-        var simpson_weights: [4]conv.Weights = undefined;
-        for (0..4) |k| {
+        var simpson_weights: [3]conv.Weights = undefined;
+        for (0..3) |k| {
             const weight_fn = weight_fns[k];
             const radius_grid_points = @min(@as(usize, @intFromFloat(@ceil(weight_fn.radius / grid.spacing))), n - 1);
             const kernel_size = radius_grid_points + 1;
 
+            // Create kink index array if this weight function has a kink
+            var kink_indices: [1]usize = undefined;
+            const kinks: ?[]const usize = if (weight_fn.kink) |kink_pos| blk: {
+                const kink_grid_index = @as(usize, @intFromFloat(@round(kink_pos / grid.spacing)));
+                if (kink_grid_index < kernel_size) {
+                    kink_indices[0] = kink_grid_index;
+                    break :blk kink_indices[0..1];
+                } else {
+                    break :blk null;
+                }
+            } else null;
+
             // Create Simpson weights if possible, otherwise rectangular
             if (kernel_size >= 3 and (kernel_size - 1) % 2 == 0) {
-                simpson_weights[k] = try conv.Weights.init(.simpson, allocator, kernel_size, grid.spacing);
+                simpson_weights[k] = try conv.Weights.init(.simpson, allocator, kernel_size, grid.spacing, kinks);
             } else {
-                simpson_weights[k] = try conv.Weights.init(.rectangular, allocator, kernel_size, 0.1);
+                simpson_weights[k] = try conv.Weights.init(.rectangular, allocator, kernel_size, 0.1, null);
             }
         }
-        defer for (0..4) |k| simpson_weights[k].deinit(allocator);
+        defer for (0..3) |k| simpson_weights[k].deinit(allocator);
 
         // Step 3: Create the three kernels
-        // weightFn0 (i=0)
-        {
-            const weight_fn = weight_fns[0];
+        for (0..3) |i| {
+            const weight_fn = weight_fns[i];
             const radius_grid_points = @min(@as(usize, @intFromFloat(@ceil(weight_fn.radius / grid.spacing))), n - 1);
 
             var kernel_values = try allocator.alloc(f64, radius_grid_points + 1);
@@ -182,44 +193,7 @@ pub const HardSphereKernel = struct {
                 kernel_values[offset] = weight_fn.ptr(hs, distance);
             }
 
-            kernels[0] = try conv.Kernel.init(allocator, kernel_values, n, simpson_weights[0]);
-        }
-
-        // weightFn1 (unified) (i=1)
-        {
-            const joined_weights = try conv.join(allocator, simpson_weights[2], simpson_weights[3]);
-            defer joined_weights.deinit(allocator);
-
-            const core_fn = weight_fns[2]; // weightFn1core
-            const tail_fn = weight_fns[3]; // weightFn1tail
-            const max_radius = @max(core_fn.radius, tail_fn.radius);
-            const radius_grid_points = @min(@as(usize, @intFromFloat(@ceil(max_radius / grid.spacing))), n - 1);
-
-            var unified_kernel_values = try allocator.alloc(f64, radius_grid_points + 1);
-            defer allocator.free(unified_kernel_values);
-
-            for (0..radius_grid_points + 1) |offset| {
-                const distance = grid.spacing * @as(f64, @floatFromInt(offset));
-                unified_kernel_values[offset] = hs.weightFn1(distance);
-            }
-
-            kernels[1] = try conv.Kernel.init(allocator, unified_kernel_values, n, joined_weights);
-        }
-
-        // weightFn2 (i=2)
-        {
-            const weight_fn = weight_fns[1]; // weight_functions[1] = weightFn2
-            const radius_grid_points = @min(@as(usize, @intFromFloat(@ceil(weight_fn.radius / grid.spacing))), n - 1);
-
-            var kernel_values = try allocator.alloc(f64, radius_grid_points + 1);
-            defer allocator.free(kernel_values);
-
-            for (0..radius_grid_points + 1) |offset| {
-                const distance = grid.spacing * @as(f64, @floatFromInt(offset));
-                kernel_values[offset] = weight_fn.ptr(hs, distance);
-            }
-
-            kernels[2] = try conv.Kernel.init(allocator, kernel_values, n, simpson_weights[1]);
+            kernels[i] = try conv.Kernel.init(allocator, kernel_values, n, simpson_weights[i]);
         }
 
         return Self{
