@@ -9,8 +9,12 @@ const Matrix = @import("matrix.zig").Matrix;
 /// Weight function with its theoretical radius
 pub const WeightFunction = struct {
     ptr: *const fn (HardSphereDFT, f64) f64,
-    /// Theoretical radius in physical units
+
+    /// Cutoff radius for the weight function
     radius: f64,
+
+    /// Optional kink point for discontinuity handling
+    kink: ?f64 = null,
 };
 
 pub const HardSphereDFT = struct {
@@ -27,12 +31,12 @@ pub const HardSphereDFT = struct {
 
     /// Get weight functions with precalculated physical radii
     /// Ordered for easy mapping: [weightFn0, weightFn2, weightFn1core, weightFn1tail]
-    pub fn getWeightFunctions(self: Self) [4]WeightFunction {
+    pub fn getWeightFns(self: Self) [3]WeightFunction {
+        const sigma = self.diameter;
         return [_]WeightFunction{
-            .{ .ptr = weightFn0, .radius = 1.0 * self.diameter }, // [0]
-            .{ .ptr = weightFn2, .radius = 1.0 * self.diameter }, // [1]
-            .{ .ptr = weightFn1core, .radius = 1.0 * self.diameter }, // [2] core
-            .{ .ptr = weightFn1tail, .radius = 5.0 * self.diameter }, // [3] tail
+            .{ .ptr = weightFn0, .radius = 1.0 * sigma },
+            .{ .ptr = weightFn1, .radius = 2.0 * sigma, .kink = 1.0 * sigma },
+            .{ .ptr = weightFn2, .radius = 1.0 * sigma },
         };
     }
 
@@ -127,7 +131,7 @@ test "HardSphereDFT weightFn1" {
     try t.expect(hs.weightFn1(2.5) < 0);
 }
 
-pub const HardSphereKernels = struct {
+pub const HardSphereKernel = struct {
     /// The expansion coefficients of density-independent weights over the grid
     /// combinations, or w_i(|r - r'|)
     /// [0]: weightFn0, [1]: weightFn1 (unified), [2]: weightFn2
@@ -146,13 +150,12 @@ pub const HardSphereKernels = struct {
 
     pub fn init(allocator: std.mem.Allocator, grid: Grid, hs: HardSphereDFT) !Self {
         const n = grid.points.len;
-        var weight_kernels: [3]conv.Kernel = undefined;
-        const weight_functions = hs.getWeightFunctions();
+        var kernels: [3]conv.Kernel = undefined;
+        const weight_fns = hs.getWeightFns();
 
-        // Step 2: Create four Simpson weights for each weight function
         var simpson_weights: [4]conv.Weights = undefined;
         for (0..4) |k| {
-            const weight_fn = weight_functions[k];
+            const weight_fn = weight_fns[k];
             const radius_grid_points = @min(@as(usize, @intFromFloat(@ceil(weight_fn.radius / grid.spacing))), n - 1);
             const kernel_size = radius_grid_points + 1;
 
@@ -168,7 +171,7 @@ pub const HardSphereKernels = struct {
         // Step 3: Create the three kernels
         // weightFn0 (i=0)
         {
-            const weight_fn = weight_functions[0];
+            const weight_fn = weight_fns[0];
             const radius_grid_points = @min(@as(usize, @intFromFloat(@ceil(weight_fn.radius / grid.spacing))), n - 1);
 
             var kernel_values = try allocator.alloc(f64, radius_grid_points + 1);
@@ -179,7 +182,7 @@ pub const HardSphereKernels = struct {
                 kernel_values[offset] = weight_fn.ptr(hs, distance);
             }
 
-            weight_kernels[0] = try conv.Kernel.init(allocator, kernel_values, n, simpson_weights[0]);
+            kernels[0] = try conv.Kernel.init(allocator, kernel_values, n, simpson_weights[0]);
         }
 
         // weightFn1 (unified) (i=1)
@@ -187,8 +190,8 @@ pub const HardSphereKernels = struct {
             const joined_weights = try conv.join(allocator, simpson_weights[2], simpson_weights[3]);
             defer joined_weights.deinit(allocator);
 
-            const core_fn = weight_functions[2]; // weightFn1core
-            const tail_fn = weight_functions[3]; // weightFn1tail
+            const core_fn = weight_fns[2]; // weightFn1core
+            const tail_fn = weight_fns[3]; // weightFn1tail
             const max_radius = @max(core_fn.radius, tail_fn.radius);
             const radius_grid_points = @min(@as(usize, @intFromFloat(@ceil(max_radius / grid.spacing))), n - 1);
 
@@ -200,12 +203,12 @@ pub const HardSphereKernels = struct {
                 unified_kernel_values[offset] = hs.weightFn1(distance);
             }
 
-            weight_kernels[1] = try conv.Kernel.init(allocator, unified_kernel_values, n, joined_weights);
+            kernels[1] = try conv.Kernel.init(allocator, unified_kernel_values, n, joined_weights);
         }
 
         // weightFn2 (i=2)
         {
-            const weight_fn = weight_functions[1]; // weight_functions[1] = weightFn2
+            const weight_fn = weight_fns[1]; // weight_functions[1] = weightFn2
             const radius_grid_points = @min(@as(usize, @intFromFloat(@ceil(weight_fn.radius / grid.spacing))), n - 1);
 
             var kernel_values = try allocator.alloc(f64, radius_grid_points + 1);
@@ -216,11 +219,11 @@ pub const HardSphereKernels = struct {
                 kernel_values[offset] = weight_fn.ptr(hs, distance);
             }
 
-            weight_kernels[2] = try conv.Kernel.init(allocator, kernel_values, n, simpson_weights[1]);
+            kernels[2] = try conv.Kernel.init(allocator, kernel_values, n, simpson_weights[1]);
         }
 
         return Self{
-            .weights = weight_kernels,
+            .weights = kernels,
             .grid = grid,
             .hs = hs,
             .allocator = allocator,
@@ -240,8 +243,11 @@ test "HardSphereKernel init" {
     var grid = try Grid.init(allocator, 10, 5.0);
     defer grid.deinit();
     const hs = HardSphereDFT.init(1.0);
-    var kernel = try HardSphereKernels.init(allocator, grid, hs);
+    var kernel = try HardSphereKernel.init(allocator, grid, hs);
     defer kernel.deinit();
+
+    // Check that the kernels are initialized correctly
+    std.debug.print("Kernel 0: {}\n", .{kernel.weights[0]});
 }
 
 pub const HardSphereWorkspace = struct {
