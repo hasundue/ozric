@@ -13,18 +13,19 @@ pub const Kernel = struct {
     const Self = @This();
 
     /// Initialize a convolution kernel and create its symmetric band matrix
+    /// kernel_values contains only half spectrum (center + positive offsets)
     pub fn init(
         allocator: Allocator,
         kernel_values: []const f64,
-        kernel_radius: usize,
         signal_size: usize,
     ) !Self {
-        var matrix = try sb.SymmetricBandMatrix.init(allocator, signal_size, kernel_radius);
+        const radius = kernel_values.len - 1;
+        var matrix = try sb.SymmetricBandMatrix.init(allocator, signal_size, radius);
         matrix.clear();
 
         // Construct band matrix from symmetric kernel
         for (0..signal_size) |i| {
-            for (0..@min(kernel_radius + 1, signal_size - i)) |offset| {
+            for (0..@min(radius + 1, signal_size - i)) |offset| {
                 const j = i + offset;
                 if (j < signal_size and offset < kernel_values.len) {
                     matrix.set(i, j, kernel_values[offset]);
@@ -34,7 +35,7 @@ pub const Kernel = struct {
 
         return Self{
             .matrix = matrix,
-            .radius = kernel_radius,
+            .radius = radius,
         };
     }
 
@@ -64,7 +65,7 @@ pub fn benchmark_convolution(allocator: Allocator) !void {
         var kernel = try allocator.alloc(f64, kernel_radius + 1);
         defer allocator.free(kernel);
 
-        // Generation of Gaussian kernel
+        // Generation of Gaussian kernel (half spectrum)
         for (0..kernel_radius + 1) |i| {
             const x = @as(f64, @floatFromInt(i));
             kernel[i] = math.exp(-0.5 * x * x);
@@ -76,7 +77,7 @@ pub fn benchmark_convolution(allocator: Allocator) !void {
         }
 
         // Create kernel and execute benchmark
-        var kernel_obj = try Kernel.init(allocator, kernel, kernel_radius, size);
+        var kernel_obj = try Kernel.init(allocator, kernel, size);
         defer kernel_obj.deinit(allocator);
 
         const start_time = std.time.nanoTimestamp();
@@ -95,27 +96,24 @@ test "convolution test" {
     const allocator = testing.allocator;
 
     // Simple convolution test with known expected results
-    const kernel = [_]f64{ 0.25, 0.5, 0.25 }; // smoothing kernel
+    const kernel = [_]f64{ 0.5, 0.25 }; // smoothing kernel (half spectrum: center + positive offset)
     const signal = [_]f64{ 1, 2, 3, 4, 5 };
     const result = try allocator.alloc(f64, signal.len);
     defer allocator.free(result);
 
     // Create kernel
-    var kernel_obj = try Kernel.init(allocator, &kernel, 1, signal.len);
+    var kernel_obj = try Kernel.init(allocator, &kernel, signal.len);
     defer kernel_obj.deinit(allocator);
 
     kernel_obj.convolve(&signal, result);
 
-    // Expected results for smoothing kernel [0.25, 0.5, 0.25]
-    // Manual calculation considering boundary effects:
-    // result[0] = 0.25*0 + 0.5*1 + 0.25*2 = 1.0
-    // result[1] = 0.25*1 + 0.5*2 + 0.25*3 = 2.0
-    // result[2] = 0.25*2 + 0.5*3 + 0.25*4 = 3.0
-    // result[3] = 0.25*3 + 0.5*4 + 0.25*5 = 4.0
-    // result[4] = 0.25*4 + 0.5*5 + 0.25*0 = 3.5
+    // Expected results for smoothing kernel [0.5, 0.25] (symmetric: [0.25, 0.5, 0.25])
+    // Manual calculation considering boundary effects with symmetric band matrix:
+    // The kernel [0.5, 0.25] represents center value 0.5 and offset value 0.25
+    // This creates a symmetric kernel where A[i,i] = 0.5 and A[i,i+1] = A[i+1,i] = 0.25
 
     // Verify key results based on actual symmetric band matrix convolution behavior
-    const expected = [_]f64{ 1.25, 2.5, 3.75, 5.0, 3.25 };
+    const expected = [_]f64{ 1.0, 2.0, 3.0, 4.0, 3.5 };
     try testing.expectEqualSlices(f64, &expected, result);
 
     // Verify that the result is reasonable (all values positive and bounded)
@@ -128,24 +126,24 @@ test "kernel comparison" {
     const allocator = testing.allocator;
 
     // Test different kernels
-    const kernel1 = [_]f64{ 0.25, 0.5, 0.25 }; // smoothing kernel
-    const kernel2 = [_]f64{ 1.0, 0.0, 0.0 }; // identity kernel
+    const kernel1 = [_]f64{ 0.5, 0.25 }; // smoothing kernel (half spectrum)
+    const kernel2 = [_]f64{ 1.0, 0.0 }; // identity kernel (half spectrum)
     const signal = [_]f64{ 1, 2, 3, 4, 5 };
     const result = try allocator.alloc(f64, signal.len);
     defer allocator.free(result);
 
     // First convolution with smoothing kernel
     {
-        var kernel_obj = try Kernel.init(allocator, &kernel1, 1, signal.len);
+        var kernel_obj = try Kernel.init(allocator, &kernel1, signal.len);
         defer kernel_obj.deinit(allocator);
         kernel_obj.convolve(&signal, result);
-        const expected_smooth = [_]f64{ 1.25, 2.5, 3.75, 5.0, 3.25 };
+        const expected_smooth = [_]f64{ 1.0, 2.0, 3.0, 4.0, 3.5 };
         try testing.expectEqualSlices(f64, expected_smooth[0..2], result[0..2]);
     }
 
     // Second convolution with identity kernel (should return original signal)
     {
-        var kernel_obj = try Kernel.init(allocator, &kernel2, 1, signal.len);
+        var kernel_obj = try Kernel.init(allocator, &kernel2, signal.len);
         defer kernel_obj.deinit(allocator);
         kernel_obj.convolve(&signal, result);
         try testing.expectEqualSlices(f64, &signal, result);
@@ -156,15 +154,15 @@ test "convolution matrix creation" {
     const allocator = testing.allocator;
     const eqa = testing.expectApproxEqAbs;
 
-    const kernel = [_]f64{ 0.25, 0.5, 0.25 };
+    const kernel = [_]f64{ 0.5, 0.25 };
     const signal_size = 5;
 
-    var kernel_obj = try Kernel.init(allocator, &kernel, 2, signal_size);
+    var kernel_obj = try Kernel.init(allocator, &kernel, signal_size);
     defer kernel_obj.deinit(allocator);
 
     // Check that the kernel values are properly stored
-    const test_positions = [_][2]usize{ .{ 0, 0 }, .{ 0, 1 }, .{ 0, 2 }, .{ 1, 0 }, .{ 1, 1 }, .{ 1, 2 } };
-    const expected_values = [_]f64{ 0.25, 0.5, 0.25, 0.5, 0.25, 0.5 };
+    const test_positions = [_][2]usize{ .{ 0, 0 }, .{ 0, 1 }, .{ 1, 0 }, .{ 1, 1 }, .{ 1, 2 } };
+    const expected_values = [_]f64{ 0.5, 0.25, 0.25, 0.5, 0.25 };
     for (test_positions, expected_values) |pos, expected| {
         try eqa(expected, kernel_obj.matrix.get(pos[0], pos[1]), 1e-10);
     }
