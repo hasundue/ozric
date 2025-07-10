@@ -40,63 +40,55 @@ pub const Weights = struct {
     ) !Weights {
         const n = data.len;
         if (n < 3) return error.InsufficientPoints;
+        if ((n - 1) % 2 != 0) return error.OddIntervals; // n-1 intervals must be even
 
         // Initialize all weights to zero
         @memset(data, 0.0);
 
-        if (kinks) |kink_indices| {
-            // Create chunks separated by kinks
-            var chunks = std.ArrayList([2]usize).init(std.heap.page_allocator);
-            defer chunks.deinit();
+        // Treat no kinks as having a kink at the end
+        const default_kinks = [_]usize{n - 1};
+        const kink_indices = kinks orelse &default_kinks;
 
-            // First chunk starts at 0
-            var chunk_start: usize = 0;
+        // Create chunks separated by kinks
+        var chunks = std.ArrayList([2]usize).init(std.heap.page_allocator);
+        defer chunks.deinit();
 
-            // Add chunks for each kink
-            for (kink_indices) |kink_idx| {
-                if (kink_idx > chunk_start and kink_idx < n) {
-                    try chunks.append(.{ chunk_start, kink_idx });
-                    chunk_start = kink_idx;
-                }
+        // First chunk starts at 0
+        var chunk_start: usize = 0;
+
+        // Add chunks for each kink
+        for (kink_indices) |kink_idx| {
+            if (kink_idx > chunk_start and kink_idx < n) {
+                try chunks.append(.{ chunk_start, kink_idx });
+                chunk_start = kink_idx;
             }
+        }
 
-            // Add final chunk
-            if (chunk_start < n - 1) {
-                try chunks.append(.{ chunk_start, n - 1 });
-            }
+        // Add final chunk
+        if (chunk_start < n - 1) {
+            try chunks.append(.{ chunk_start, n - 1 });
+        }
 
-            // Apply Simpson's rule to each chunk
-            for (chunks.items) |chunk| {
-                const start = chunk[0];
-                const end = chunk[1];
-                const chunk_len = end - start + 1;
+        // Apply Simpson's rule to each chunk
+        for (chunks.items) |chunk| {
+            const start = chunk[0];
+            const end = chunk[1];
+            const chunk_len = end - start + 1;
 
-                if (chunk_len < 3) continue; // Skip chunks too small for Simpson's rule
+            if (chunk_len < 3) continue; // Skip chunks too small for Simpson's rule
 
-                // Check if chunk has even number of intervals (odd number of points)
-                const intervals = chunk_len - 1;
-                if (intervals % 2 != 0) continue; // Skip chunks with odd intervals
+            // Check if chunk has even number of intervals (odd number of points)
+            const intervals = chunk_len - 1;
+            if (intervals % 2 != 0) continue; // Skip chunks with odd intervals
 
-                // Apply Simpson's rule: [1, 4, 2, 4, 2, ..., 4, 1] * h/3
-                data[start] += h / 3.0;
-                data[end] += h / 3.0;
+            // Apply Simpson's rule: [1, 4, 2, 4, 2, ..., 4, 1] * h/3
+            data[start] += h / 3.0;
+            data[end] += h / 3.0;
 
-                for (start + 1..end) |i| {
-                    const offset_in_chunk = i - start;
-                    const coefficient: f64 = if (offset_in_chunk % 2 == 1) 4.0 else 2.0;
-                    data[i] += coefficient * h / 3.0;
-                }
-            }
-        } else {
-            // No kinks - standard Simpson's rule
-            if ((n - 1) % 2 != 0) return error.OddIntervals; // n-1 intervals must be even
-
-            data[0] = h / 3.0;
-            data[n - 1] = h / 3.0;
-
-            for (1..n - 1) |i| {
-                const coefficient: f64 = if (i % 2 == 1) 4.0 else 2.0;
-                data[i] = coefficient * h / 3.0;
+            for (start + 1..end) |i| {
+                const offset_in_chunk = i - start;
+                const coefficient: f64 = if (offset_in_chunk % 2 == 1) 4.0 else 2.0;
+                data[i] += coefficient * h / 3.0;
             }
         }
 
