@@ -6,4 +6,5 @@ test "lib" {
 
 test "la" {
     _ = @import("la/dsbmv.zig");
+    _ = @import("la/sb.zig");
 }
