@@ -2,8 +2,8 @@ const std = @import("std");
 const math = std.math;
 const testing = std.testing;
 const Allocator = std.mem.Allocator;
-const dsbmv = @import("la/dsbmv.zig");
-const sb = @import("la/sb.zig");
+const dsbmv = @import("linear/dsbmv.zig");
+const sb = @import("linear/sb.zig");
 
 /// Create a symmetric band matrix from a kernel for convolution
 pub fn createConvolutionMatrix(

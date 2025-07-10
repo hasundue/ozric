@@ -4,7 +4,7 @@ test "lib" {
     _ = @import("convolution.zig");
 }
 
-test "la" {
+test "linear" {
     _ = @import("la/dsbmv.zig");
     _ = @import("la/sb.zig");
 }

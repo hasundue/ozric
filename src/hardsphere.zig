@@ -1,6 +1,7 @@
 const std = @import("std");
 const math = std.math;
 const t = std.testing;
+const conv = @import("convolution.zig");
 
 const Grid = @import("grid.zig").Grid;
 const Matrix = @import("matrix.zig").Matrix;
@@ -27,32 +28,48 @@ pub const HardSphereDFT = struct {
     }
 
     pub fn weightFn1(self: Self, r: f64) f64 {
+        if (r < self.diameter) {
+            return self.weightFn1c(r);
+        } else {
+            return self.weightFn1t(r);
+        }
+    }
+
+    // The first order weight function inside the hard sphere
+    pub fn weightFn1c(self: Self, r: f64) f64 {
+        if (r > self.diameter) return 0.0;
+
         const x = r / self.diameter;
         const x2 = math.pow(f64, x, 2);
 
-        if (x <= 1.0) {
-            const a_0 = 0.90724;
-            const a_1 = -1.23717;
-            const a_2 = 0.21616;
+        const a_0 = 0.90724;
+        const a_1 = -1.23717;
+        const a_2 = 0.21616;
 
-            return a_0 + a_1 * x + a_2 * x2;
-        } else {
-            const x3 = math.pow(f64, x, 3);
+        return a_0 + a_1 * x + a_2 * x2;
+    }
 
-            const c = -0.10244;
-            const b_0 = 35.134;
-            const alpha = 4.934;
-            const b_1 = -98.684;
-            const beta_1 = 3.5621;
-            const b_2 = 92.693;
-            const beta_2 = 12.0;
-            const b_3 = -29.257;
+    /// The second order weight function outside the hard sphere
+    pub fn weightFn1t(self: Self, r: f64) f64 {
+        if (r < self.diameter) return 0.0;
 
-            const first = c * @exp(-beta_1 * (x - 1.0)) * @sin(alpha * (x - 1.0));
-            const second = @exp(-beta_2 * (x - 1.0)) * (b_0 + b_1 * x + b_2 * x2 + b_3 * x3);
+        const x = r / self.diameter;
+        const x2 = math.pow(f64, x, 2);
+        const x3 = math.pow(f64, x, 3);
 
-            return first + second;
-        }
+        const c = -0.10244;
+        const b_0 = 35.134;
+        const alpha = 4.934;
+        const b_1 = -98.684;
+        const beta_1 = 3.5621;
+        const b_2 = 92.693;
+        const beta_2 = 12.0;
+        const b_3 = -29.257;
+
+        const first = c * @exp(-beta_1 * (x - 1.0)) * @sin(alpha * (x - 1.0));
+        const second = @exp(-beta_2 * (x - 1.0)) * (b_0 + b_1 * x + b_2 * x2 + b_3 * x3);
+
+        return first + second;
     }
 
     pub fn weightFn2(self: Self, r: f64) f64 {
@@ -92,10 +109,10 @@ test "HardSphereDFT weightFn1" {
     try t.expect(hs.weightFn1(2.5) < 0);
 }
 
-pub const HardSphereKernel = struct {
+pub const HardSphereKernels = struct {
     /// The expansion coefficients of density-independent weights over the grid
     /// combinations, or w_i(|r - r'|)
-    weight_fns: [3]Matrix,
+    weights: [4]conv.Kernel,
 
     /// Reference to the grid
     grid: Grid,
@@ -136,7 +153,7 @@ pub const HardSphereKernel = struct {
         }
 
         return Self{
-            .weight_fns = weight_fns,
+            .weights = weight_fns,
             .grid = grid,
             .hs = hs,
             .allocator = allocator,
@@ -146,7 +163,7 @@ pub const HardSphereKernel = struct {
     pub fn deinit(self: *Self) void {
         // Free weight matrices
         for (0..3) |i| {
-            self.weight_fns[i].deinit(self.allocator);
+            self.weights[i].deinit(self.allocator);
         }
     }
 };
@@ -156,13 +173,13 @@ test "HardSphereKernel init" {
     var grid = try Grid.init(allocator, 10, 5.0);
     defer grid.deinit();
     const hs = HardSphereDFT.init(1.0);
-    var kernel = try HardSphereKernel.init(allocator, grid, hs);
+    var kernel = try HardSphereKernels.init(allocator, grid, hs);
     defer kernel.deinit();
 
     // Check that the weight functions are initialized correctly
-    try t.expect(kernel.weight_fns[0].at(0, 1) == hs.weightFn0(grid.distance(0, 1)));
-    try t.expect(kernel.weight_fns[1].at(0, 1) == hs.weightFn1(grid.distance(0, 1)));
-    try t.expect(kernel.weight_fns[2].at(0, 1) == hs.weightFn2(grid.distance(0, 1)));
+    try t.expect(kernel.weights[0].at(0, 1) == hs.weightFn0(grid.distance(0, 1)));
+    try t.expect(kernel.weights[1].at(0, 1) == hs.weightFn1(grid.distance(0, 1)));
+    try t.expect(kernel.weights[2].at(0, 1) == hs.weightFn2(grid.distance(0, 1)));
 }
 
 pub const HardSphereWorkspace = struct {
