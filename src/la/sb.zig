@@ -75,29 +75,6 @@ pub const SymmetricBandMatrix = struct {
     }
 };
 
-/// Create a symmetric band matrix from a kernel for convolution
-pub fn createConvolutionMatrix(
-    allocator: Allocator,
-    kernel: []const f64,
-    kernel_radius: usize,
-    signal_size: usize,
-) !SymmetricBandMatrix {
-    var matrix = try SymmetricBandMatrix.init(allocator, signal_size, kernel_radius);
-    matrix.clear();
-
-    // Construct band matrix from symmetric kernel
-    for (0..signal_size) |i| {
-        for (0..@min(kernel_radius + 1, signal_size - i)) |offset| {
-            const j = i + offset;
-            if (j < signal_size and offset < kernel.len) {
-                matrix.set(i, j, kernel[offset]);
-            }
-        }
-    }
-
-    return matrix;
-}
-
 test "symmetric band matrix basic operations" {
     const allocator = testing.allocator;
     const eqa = testing.expectApproxEqAbs;
@@ -114,17 +91,24 @@ test "symmetric band matrix basic operations" {
     matrix.set(2, 2, 2.0);
 
     // Test getting values with symmetry
-    try eqa(2.0, matrix.get(0, 0), 1e-10);
-    try eqa(1.0, matrix.get(0, 1), 1e-10);
-    try eqa(1.0, matrix.get(1, 0), 1e-10); // symmetric
-    try eqa(2.0, matrix.get(1, 1), 1e-10);
-    try eqa(1.0, matrix.get(1, 2), 1e-10);
-    try eqa(1.0, matrix.get(2, 1), 1e-10); // symmetric
-    try eqa(2.0, matrix.get(2, 2), 1e-10);
+    const diagonal_positions = [_][2]usize{ .{ 0, 0 }, .{ 1, 1 }, .{ 2, 2 } };
+    const diagonal_expected = [_]f64{ 2.0, 2.0, 2.0 };
+    for (diagonal_positions, diagonal_expected) |pos, expected| {
+        try eqa(expected, matrix.get(pos[0], pos[1]), 1e-10);
+    }
+
+    // Test off-diagonal elements and symmetry
+    const off_diag_positions = [_][2]usize{ .{ 0, 1 }, .{ 1, 0 }, .{ 1, 2 }, .{ 2, 1 } };
+    const off_diag_expected = [_]f64{ 1.0, 1.0, 1.0, 1.0 };
+    for (off_diag_positions, off_diag_expected) |pos, expected| {
+        try eqa(expected, matrix.get(pos[0], pos[1]), 1e-10);
+    }
 
     // Test out-of-band elements
-    try eqa(0.0, matrix.get(0, 2), 1e-10);
-    try eqa(0.0, matrix.get(2, 0), 1e-10);
+    const out_of_band_positions = [_][2]usize{ .{ 0, 2 }, .{ 2, 0 } };
+    for (out_of_band_positions) |pos| {
+        try eqa(0.0, matrix.get(pos[0], pos[1]), 1e-10);
+    }
 }
 
 test "symmetric band matrix properties" {
@@ -140,30 +124,8 @@ test "symmetric band matrix properties" {
     try eq(15, matrix.data.len);
 }
 
-test "convolution matrix creation" {
-    const allocator = testing.allocator;
-    const eqa = testing.expectApproxEqAbs;
-
-    const kernel = [_]f64{ 0.25, 0.5, 0.25 };
-    const signal_size = 5;
-
-    var matrix = try createConvolutionMatrix(allocator, &kernel, 2, signal_size);
-    defer matrix.deinit(allocator);
-
-    // Check that the kernel values are properly stored
-    try eqa(0.25, matrix.get(0, 0), 1e-10);
-    try eqa(0.5, matrix.get(0, 1), 1e-10);
-    try eqa(0.25, matrix.get(0, 2), 1e-10);
-
-    // Test symmetry
-    try eqa(0.5, matrix.get(1, 0), 1e-10);
-    try eqa(0.25, matrix.get(1, 1), 1e-10);
-    try eqa(0.5, matrix.get(1, 2), 1e-10);
-}
-
 test "matrix clear operation" {
     const allocator = testing.allocator;
-    const eqa = testing.expectApproxEqAbs;
 
     var matrix = try SymmetricBandMatrix.init(allocator, 3, 1);
     defer matrix.deinit(allocator);
@@ -175,8 +137,8 @@ test "matrix clear operation" {
     // Clear the matrix
     matrix.clear();
 
-    // Check that all values are zero
-    try eqa(0.0, matrix.get(0, 0), 1e-10);
-    try eqa(0.0, matrix.get(0, 1), 1e-10);
-    try eqa(0.0, matrix.get(1, 0), 1e-10);
+    // Check that entire data array is zeroed
+    for (matrix.data) |val| {
+        try testing.expectEqual(@as(f64, 0.0), val);
+    }
 }
