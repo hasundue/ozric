@@ -112,6 +112,7 @@ test "HardSphereDFT weightFn1" {
 pub const HardSphereKernels = struct {
     /// The expansion coefficients of density-independent weights over the grid
     /// combinations, or w_i(|r - r'|)
+    /// [0]: weightFn0, [1]: weightFn1c, [2]: weightFn1t, [3]: weightFn2
     weights: [4]conv.Kernel,
 
     /// Reference to the grid
@@ -127,33 +128,34 @@ pub const HardSphereKernels = struct {
 
     pub fn init(allocator: std.mem.Allocator, grid: Grid, hs: HardSphereDFT) !Self {
         const n = grid.points.len;
-        var weight_fns: [3]Matrix = undefined;
+        var weight_kernels: [4]conv.Kernel = undefined;
 
-        for (0..3) |i| {
-            weight_fns[i] = try Matrix.init(allocator, n, n);
-        }
+        // For a radially symmetric function on a uniform grid, we need to determine
+        // the maximum radius and create kernel values for each distance
+        const max_radius = @min(n - 1, n / 2); // Reasonable cutoff for kernel radius
 
-        // Fill in the upper triangle of the matrices
-        for (0..n) |i| {
-            for (i..n) |j| {
-                const d = grid.distance(i, j);
-                weight_fns[0].ptr(i, j).* = hs.weightFn0(d);
-                weight_fns[1].ptr(i, j).* = hs.weightFn1(d);
-                weight_fns[2].ptr(i, j).* = hs.weightFn2(d);
+        for (0..4) |k| {
+            // Create kernel values array for half spectrum [center, offset1, offset2, ...]
+            var kernel_values = try allocator.alloc(f64, max_radius + 1);
+            defer allocator.free(kernel_values);
+
+            // Fill kernel values based on grid distances
+            for (0..max_radius + 1) |offset| {
+                const distance = grid.spacing * @as(f64, @floatFromInt(offset));
+                kernel_values[offset] = switch (k) {
+                    0 => hs.weightFn0(distance),
+                    1 => hs.weightFn1c(distance),
+                    2 => hs.weightFn1t(distance),
+                    3 => hs.weightFn2(distance),
+                    else => unreachable,
+                };
             }
-        }
 
-        // Fill in the lower triangle of the matrices by symmetry
-        for (0..n) |i| {
-            for (0..i) |j| {
-                for (0..3) |k| {
-                    weight_fns[k].ptr(i, j).* = weight_fns[k].at(j, i);
-                }
-            }
+            weight_kernels[k] = try conv.Kernel.init(allocator, kernel_values, n);
         }
 
         return Self{
-            .weights = weight_fns,
+            .weights = weight_kernels,
             .grid = grid,
             .hs = hs,
             .allocator = allocator,
@@ -161,8 +163,8 @@ pub const HardSphereKernels = struct {
     }
 
     pub fn deinit(self: *Self) void {
-        // Free weight matrices
-        for (0..3) |i| {
+        // Free weight kernels
+        for (0..4) |i| {
             self.weights[i].deinit(self.allocator);
         }
     }
@@ -177,9 +179,12 @@ test "HardSphereKernel init" {
     defer kernel.deinit();
 
     // Check that the weight functions are initialized correctly
-    try t.expect(kernel.weights[0].at(0, 1) == hs.weightFn0(grid.distance(0, 1)));
-    try t.expect(kernel.weights[1].at(0, 1) == hs.weightFn1(grid.distance(0, 1)));
-    try t.expect(kernel.weights[2].at(0, 1) == hs.weightFn2(grid.distance(0, 1)));
+    // Test kernel matrix values at specific positions
+    const d01 = grid.distance(0, 1);
+    try t.expectApproxEqAbs(hs.weightFn0(d01), kernel.weights[0].matrix.get(0, 1), 1e-10);
+    try t.expectApproxEqAbs(hs.weightFn1c(d01), kernel.weights[1].matrix.get(0, 1), 1e-10);
+    try t.expectApproxEqAbs(hs.weightFn1t(d01), kernel.weights[2].matrix.get(0, 1), 1e-10);
+    try t.expectApproxEqAbs(hs.weightFn2(d01), kernel.weights[3].matrix.get(0, 1), 1e-10);
 }
 
 pub const HardSphereWorkspace = struct {

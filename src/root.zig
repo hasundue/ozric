@@ -1,6 +1,6 @@
 test "lib" {
     _ = @import("grid.zig");
-    // _ = @import("hardsphere.zig"); // under construction
+    _ = @import("hardsphere.zig");
     _ = @import("convolution.zig");
 }
 
