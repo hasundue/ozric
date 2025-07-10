@@ -9,8 +9,8 @@ const Matrix = @import("matrix.zig").Matrix;
 /// Weight function with its theoretical radius
 pub const WeightFunction = struct {
     ptr: *const fn (HardSphereDFT, f64) f64,
-    /// Theoretical radius in units of hard sphere diameter
-    radius_factor: f64,
+    /// Theoretical radius in physical units
+    radius: f64,
 };
 
 pub const HardSphereDFT = struct {
@@ -25,14 +25,15 @@ pub const HardSphereDFT = struct {
         };
     }
 
-    /// Array of weight functions with their theoretical radii
-    /// [weightFn0, weightFn1core, weightFn1tail, weightFn2]
-    pub const weightFunctions = [_]WeightFunction{
-        .{ .ptr = weightFn0, .radius_factor = 1.0 }, // cutoff at diameter
-        .{ .ptr = weightFn1core, .radius_factor = 1.0 }, // core function, cutoff at diameter
-        .{ .ptr = weightFn1tail, .radius_factor = 5.0 }, // tail function, extends to ~5 diameters
-        .{ .ptr = weightFn2, .radius_factor = 1.0 }, // cutoff at diameter
-    };
+    /// Get weight functions with precalculated physical radii
+    pub fn getWeightFunctions(self: Self) [4]WeightFunction {
+        return [_]WeightFunction{
+            .{ .ptr = weightFn0, .radius = 1.0 * self.diameter }, // cutoff at diameter
+            .{ .ptr = weightFn1core, .radius = 1.0 * self.diameter }, // core function, cutoff at diameter
+            .{ .ptr = weightFn1tail, .radius = 5.0 * self.diameter }, // tail function, extends to ~5 diameters
+            .{ .ptr = weightFn2, .radius = 1.0 * self.diameter }, // cutoff at diameter
+        };
+    }
 
     pub fn weightFn0(self: Self, r: f64) f64 {
         if (r > self.diameter) return 0.0;
@@ -145,13 +146,13 @@ pub const HardSphereKernels = struct {
     pub fn init(allocator: std.mem.Allocator, grid: Grid, hs: HardSphereDFT) !Self {
         const n = grid.points.len;
         var weight_kernels: [4]conv.Kernel = undefined;
+        const weight_functions = hs.getWeightFunctions();
 
         for (0..4) |k| {
-            const weight_fn = HardSphereDFT.weightFunctions[k];
+            const weight_fn = weight_functions[k];
 
-            // Calculate theoretical radius in grid points
-            const theoretical_radius = weight_fn.radius_factor * hs.diameter;
-            const radius_grid_points = @min(@as(usize, @intFromFloat(@ceil(theoretical_radius / grid.spacing))), n - 1);
+            // Calculate radius in grid points
+            const radius_grid_points = @min(@as(usize, @intFromFloat(@ceil(weight_fn.radius / grid.spacing))), n - 1);
 
             // Create kernel values array for half spectrum [center, offset1, offset2, ...]
             var kernel_values = try allocator.alloc(f64, radius_grid_points + 1);
@@ -193,8 +194,9 @@ test "HardSphereKernel init" {
     // Check that the weight functions are initialized correctly
     // Test kernel matrix values at specific positions
     const d01 = grid.distance(0, 1);
+    const weight_functions = hs.getWeightFunctions();
     for (0..4) |i| {
-        const expected = HardSphereDFT.weightFunctions[i].ptr(hs, d01);
+        const expected = weight_functions[i].ptr(hs, d01);
         const actual = kernel.weights[i].matrix.get(0, 1);
         try t.expectApproxEqAbs(expected, actual, 1e-10);
     }
