@@ -5,6 +5,45 @@ const Allocator = std.mem.Allocator;
 const dsbmv = @import("linear/dsbmv.zig");
 const sb = @import("linear/sb.zig");
 
+pub const WeightRule = enum {
+    // .Trapezoidal, // Trapezoidal rule weights (not implemented)
+    simpson, // Simpson's rule weights
+};
+
+pub const Weights = struct {
+    data: []f64,
+
+    const Self = @This();
+
+    pub fn init(
+        comptime rule: WeightRule,
+        allocator: Allocator,
+        n: usize,
+        h: f64,
+    ) !Weights {
+        var data = try allocator.alloc(f64, n);
+
+        if (rule == .simpson) {
+            return try initSimpsonWeights(allocator, &data, h);
+        } else {
+            unreachable;
+        }
+    }
+
+    fn initSimpsonWeights(
+        allocator: Allocator,
+        data: *[]f64,
+        h: f64,
+    ) !Weights {}
+
+    pub fn concat(
+        self: Self,
+        other: Weights,
+    ) !Weights {
+        // concat two Weights at a shared discontinuity point
+    }
+};
+
 /// Convolution kernel for symmetric band matrix operations
 pub const Kernel = struct {
     matrix: sb.SymmetricBandMatrix,
@@ -40,7 +79,13 @@ pub const Kernel = struct {
     }
 
     /// Perform convolution with the kernel
-    pub fn convolve(self: *const Self, signal: []const f64, result: []f64) void {
+    pub fn convolve(
+        self: *const Self,
+        weights: Weights,
+        signal: []const f64,
+        result: []f64,
+    ) void {
+        // TODO: do result = self x weights here
         dsbmv.dsbmv(.U, self.matrix.n, self.matrix.k, 1.0, self.matrix.data, self.matrix.lda, signal, 1, 0.0, result, 1);
     }
 
