@@ -214,7 +214,7 @@ pub const HardSphereKernel = struct {
 
 test "HardSphereKernel init" {
     const allocator = t.allocator;
-    var grid = try Grid.init(allocator, 10, 5.0);
+    var grid = try Grid.init(allocator, 0.5, 5.0);
     defer grid.deinit();
     const hs = HardSphereDFT.init(1.0);
     var kernel = try HardSphereKernel.init(allocator, grid, hs);
@@ -307,7 +307,7 @@ pub const HardSphereWorkspace = struct {
 
 test "HardSphereWorkspace init" {
     const allocator = t.allocator;
-    var grid = try Grid.init(allocator, 10, 5.0);
+    var grid = try Grid.init(allocator, 0.5, 5.0);
     defer grid.deinit();
     const hs = HardSphereDFT.init(1.0);
     var workspace = try HardSphereWorkspace.init(allocator, grid, hs);
