@@ -4,7 +4,6 @@ const t = std.testing;
 const conv = @import("convolution.zig");
 
 const Grid = @import("grid.zig").Grid;
-const Matrix = @import("matrix.zig").Matrix;
 
 /// Weight function with its theoretical radius
 pub const WeightFunction = struct {
@@ -21,12 +20,21 @@ pub const HardSphereDFT = struct {
     /// Hard-sphere diameter
     diameter: f64,
 
+    /// Number of grid points per diameter for optimal discretization
+    points_per_diameter: usize,
+
     const Self = @This();
 
-    pub fn init(diameter: f64) Self {
+    pub fn init(diameter: f64, points_per_diameter: usize) Self {
         return Self{
             .diameter = diameter,
+            .points_per_diameter = points_per_diameter,
         };
+    }
+
+    /// Calculate optimal grid spacing that aligns diameter with a grid point
+    pub fn getOptimalSpacing(self: Self) f64 {
+        return self.diameter / @as(f64, @floatFromInt(self.points_per_diameter));
     }
 
     /// Get weight functions with precalculated physical radii
@@ -106,12 +114,26 @@ pub const HardSphereDFT = struct {
 };
 
 test "HardSphereDFT init" {
-    const hs = HardSphereDFT.init(1.0);
+    const hs = HardSphereDFT.init(1.0, 10);
     try t.expectEqual(@as(f64, 1.0), hs.diameter);
+    try t.expectEqual(@as(usize, 10), hs.points_per_diameter);
+}
+
+test "HardSphereDFT optimal spacing calculation" {
+    const hs = HardSphereDFT.init(1.0, 10);
+    const spacing = hs.getOptimalSpacing();
+
+    // With diameter=1.0 and points_per_diameter=10, spacing should be 0.1
+    try t.expectEqual(@as(f64, 0.1), spacing);
+
+    // Verify that the hard sphere diameter falls exactly on a grid point
+    // At spacing=0.1, diameter=1.0 should be at grid index 10
+    const diameter_grid_index = @as(usize, @intFromFloat(hs.diameter / spacing));
+    try t.expectEqual(@as(usize, 10), diameter_grid_index);
 }
 
 test "HardSphereDFT weightFn1" {
-    const hs = HardSphereDFT.init(1.0);
+    const hs = HardSphereDFT.init(1.0, 10);
 
     try t.expectApproxEqAbs(0.90724, hs.weightFn1(0), 1e-5);
 
@@ -148,7 +170,11 @@ pub const HardSphereKernel = struct {
 
     const Self = @This();
 
-    pub fn init(allocator: std.mem.Allocator, grid: Grid, hs: HardSphereDFT) !Self {
+    pub fn init(allocator: std.mem.Allocator, hs: HardSphereDFT, max_size: f64) !Self {
+        // Create grid with optimal spacing that aligns diameter with grid points
+        const spacing = hs.getOptimalSpacing();
+        const grid = try Grid.init(allocator, spacing, max_size);
+
         const n = grid.points.len;
         var kernels: [3]conv.Kernel = undefined;
         const weight_fns = hs.getWeightFns();
@@ -209,15 +235,15 @@ pub const HardSphereKernel = struct {
         for (0..3) |i| {
             self.weights[i].deinit(self.allocator);
         }
+        // Free grid
+        self.grid.deinit();
     }
 };
 
 test "HardSphereKernel init" {
     const allocator = t.allocator;
-    var grid = try Grid.init(allocator, 0.5, 5.0);
-    defer grid.deinit();
-    const hs = HardSphereDFT.init(1.0);
-    var kernel = try HardSphereKernel.init(allocator, grid, hs);
+    const hs = HardSphereDFT.init(1.0, 10);
+    var kernel = try HardSphereKernel.init(allocator, hs, 5.0);
     defer kernel.deinit();
 
     // Check that the kernels are initialized correctly
@@ -255,7 +281,11 @@ pub const HardSphereWorkspace = struct {
     const Self = @This();
 
     /// Initialize the density fnal workspace buffers
-    pub fn init(allocator: std.mem.Allocator, grid: Grid, hs: HardSphereDFT) !Self {
+    pub fn init(allocator: std.mem.Allocator, hs: HardSphereDFT, max_size: f64) !Self {
+        // Create grid with optimal spacing that aligns diameter with grid points
+        const spacing = hs.getOptimalSpacing();
+        const grid = try Grid.init(allocator, spacing, max_size);
+
         var weighted_density_expansions: [3][]f64 = undefined;
         var weight_fns_fourier: [3][]math.Complex(f64) = undefined;
 
@@ -301,15 +331,16 @@ pub const HardSphereWorkspace = struct {
 
             self.allocator.free(self.density_fourier);
             self.allocator.free(self.weighted_density_fourier);
+
+            // Free grid
+            self.grid.deinit();
         }
     }
 };
 
 test "HardSphereWorkspace init" {
     const allocator = t.allocator;
-    var grid = try Grid.init(allocator, 0.5, 5.0);
-    defer grid.deinit();
-    const hs = HardSphereDFT.init(1.0);
-    var workspace = try HardSphereWorkspace.init(allocator, grid, hs);
+    const hs = HardSphereDFT.init(1.0, 10);
+    var workspace = try HardSphereWorkspace.init(allocator, hs, 5.0);
     defer workspace.deinit();
 }
