@@ -8,15 +8,13 @@ const Grid = @import("grid.zig").Grid;
 /// Number of grid points per diameter for optimal discretization
 const GRID_PPD: usize = 16;
 
-/// Weight function with its theoretical radius
+/// Weight function with its grid node indices
 pub const WeightFunction = struct {
     ptr: *const fn (HardSphereDFT, f64) f64,
 
-    /// Cutoff radius for the weight function
-    radius: f64,
-
-    /// Optional kink point for discontinuity handling
-    kink: ?f64 = null,
+    /// Grid node distances relative to the hard sphere diameter
+    /// Array ends at the cutoff radius, with kinks as intermediate points
+    nodes: []const usize,
 };
 
 pub const HardSphereDFT = struct {
@@ -36,14 +34,13 @@ pub const HardSphereDFT = struct {
         };
     }
 
-    /// Get weight functions with precalculated physical radii
-    /// Ordered for easy mapping: [weightFn0, weightFn2, weightFn1core, weightFn1tail]
+    /// Get weight functions with precalculated grid node indices
     pub fn getWeightFns(self: Self) [3]WeightFunction {
-        const sigma = self.diameter;
+        _ = self; // Weight functions are normalized, diameter doesn't affect node indices
         return [_]WeightFunction{
-            .{ .ptr = weightFn0, .radius = 1.0 * sigma },
-            .{ .ptr = weightFn1, .radius = 2.0 * sigma, .kink = 1.0 * sigma },
-            .{ .ptr = weightFn2, .radius = 1.0 * sigma },
+            .{ .ptr = weightFn0, .nodes = &[_]usize{1} }, // 0 to 1σ (0 is implicit)
+            .{ .ptr = weightFn1, .nodes = &[_]usize{ 1, 2 } }, // 0 to 2σ with kink at 1σ (0 is implicit)
+            .{ .ptr = weightFn2, .nodes = &[_]usize{1} }, // 0 to 1σ (0 is implicit)
         };
     }
 
@@ -176,39 +173,28 @@ pub const HardSphereKernel = struct {
         var simpson_weights: [3]conv.Weights = undefined;
         for (0..3) |k| {
             const weight_fn = weight_fns[k];
-            const radius_grid_points = @min(@as(usize, @intFromFloat(@ceil(weight_fn.radius / grid.spacing))), n - 1);
-            const kernel_size = radius_grid_points + 1;
-
-            // Create kink index array if this weight function has a kink
-            var kink_indices: [1]usize = undefined;
-            const kinks: ?[]const usize = if (weight_fn.kink) |kink_pos| blk: {
-                const kink_grid_index = @as(usize, @intFromFloat(@round(kink_pos / grid.spacing)));
-                if (kink_grid_index < kernel_size) {
-                    kink_indices[0] = kink_grid_index;
-                    break :blk kink_indices[0..1];
-                } else {
-                    break :blk null;
-                }
-            } else null;
-
-            // Create Simpson weights if possible, otherwise rectangular
-            if (kernel_size >= 3 and (kernel_size - 1) % 2 == 0) {
-                simpson_weights[k] = try conv.Weights.init(.simpson, allocator, kernel_size, grid.spacing, kinks);
-            } else {
-                simpson_weights[k] = try conv.Weights.init(.rectangular, allocator, kernel_size, 0.1, null);
+            // Convert relative distances to actual grid indices: distance * GRID_PPD
+            var grid_nodes: [3]usize = undefined;
+            for (weight_fn.nodes, 0..) |relative_dist, idx| {
+                grid_nodes[idx] = relative_dist * GRID_PPD;
             }
+            const actual_nodes = grid_nodes[0..weight_fn.nodes.len];
+
+            // Always use Simpson weights since kernel_size is always 2n+1 with GRID_PPD=16
+            simpson_weights[k] = try conv.Weights.init(.simpson, allocator, actual_nodes, grid.spacing);
         }
         defer for (0..3) |k| simpson_weights[k].deinit(allocator);
 
-        // Step 3: Create the three kernels
+        // Create the three kernels
         for (0..3) |i| {
             const weight_fn = weight_fns[i];
-            const radius_grid_points = @min(@as(usize, @intFromFloat(@ceil(weight_fn.radius / grid.spacing))), n - 1);
+            const max_distance = weight_fn.nodes[weight_fn.nodes.len - 1];
+            const kernel_size = max_distance * GRID_PPD + 1;
 
-            var kernel_values = try allocator.alloc(f64, radius_grid_points + 1);
+            var kernel_values = try allocator.alloc(f64, kernel_size);
             defer allocator.free(kernel_values);
 
-            for (0..radius_grid_points + 1) |offset| {
+            for (0..kernel_size) |offset| {
                 const distance = grid.spacing * @as(f64, @floatFromInt(offset));
                 kernel_values[offset] = weight_fn.ptr(hs, distance);
             }

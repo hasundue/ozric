@@ -18,14 +18,15 @@ pub const Weights = struct {
     pub fn init(
         comptime rule: WeightRule,
         allocator: Allocator,
-        n: usize,
+        nodes: []const usize,
         h: f64,
-        kinks: ?[]const usize,
     ) !Weights {
+        const max_node = nodes[nodes.len - 1];
+        const n = max_node + 1;
         const data = try allocator.alloc(f64, n);
 
         if (rule == .simpson) {
-            return try initSimpsonWeights(data, h, kinks);
+            return try initSimpsonWeights(data, h, nodes);
         } else if (rule == .rectangular) {
             return try initRectangularWeights(data);
         } else {
@@ -36,7 +37,7 @@ pub const Weights = struct {
     fn initSimpsonWeights(
         data: []f64,
         h: f64,
-        kinks: ?[]const usize,
+        nodes: []const usize,
     ) !Weights {
         const n = data.len;
         if (n < 3) return error.InsufficientPoints;
@@ -45,41 +46,24 @@ pub const Weights = struct {
         // Initialize all weights to zero
         @memset(data, 0.0);
 
-        // Treat no kinks as having a kink at the end
-        const default_kinks = [_]usize{n - 1};
-        const kink_indices = kinks orelse &default_kinks;
-
-        // Create chunks separated by kinks
-        var chunks = std.ArrayList([2]usize).init(std.heap.page_allocator);
-        defer chunks.deinit();
-
-        // First chunk starts at 0
-        var chunk_start: usize = 0;
-
-        // Add chunks for each kink
-        for (kink_indices) |kink_idx| {
-            if (kink_idx > chunk_start and kink_idx < n) {
-                try chunks.append(.{ chunk_start, kink_idx });
-                chunk_start = kink_idx;
-            }
-        }
-
-        // Add final chunk
-        if (chunk_start < n - 1) {
-            try chunks.append(.{ chunk_start, n - 1 });
-        }
-
-        // Apply Simpson's rule to each chunk
-        for (chunks.items) |chunk| {
-            const start = chunk[0];
-            const end = chunk[1];
+        // Process each chunk directly without allocation, always starting from 0
+        var prev_node: usize = 0;
+        for (nodes) |node| {
+            const start = prev_node;
+            const end = node;
             const chunk_len = end - start + 1;
 
-            if (chunk_len < 3) continue; // Skip chunks too small for Simpson's rule
+            if (chunk_len < 3) {
+                prev_node = node;
+                continue; // Skip chunks too small for Simpson's rule
+            }
 
             // Check if chunk has even number of intervals (odd number of points)
             const intervals = chunk_len - 1;
-            if (intervals % 2 != 0) continue; // Skip chunks with odd intervals
+            if (intervals % 2 != 0) {
+                prev_node = node;
+                continue; // Skip chunks with odd intervals
+            }
 
             // Apply Simpson's rule: [1, 4, 2, 4, 2, ..., 4, 1] * h/3
             data[start] += h / 3.0;
@@ -90,6 +74,8 @@ pub const Weights = struct {
                 const coefficient: f64 = if (offset_in_chunk % 2 == 1) 4.0 else 2.0;
                 data[i] += coefficient * h / 3.0;
             }
+
+            prev_node = node;
         }
 
         return Weights{ .data = data };
@@ -206,7 +192,8 @@ pub fn benchmark_convolution(allocator: Allocator) !void {
         }
 
         // Create kernel and execute benchmark
-        const rect_weights = try Weights.init(.rectangular, allocator, kernel.len, 0.1, null);
+        const nodes = [_]usize{kernel.len - 1};
+        const rect_weights = try Weights.init(.rectangular, allocator, &nodes, 0.1);
         defer rect_weights.deinit(allocator);
         var kernel_obj = try Kernel.init(allocator, kernel, size, rect_weights);
         defer kernel_obj.deinit(allocator);
@@ -233,7 +220,8 @@ test "convolution test" {
     defer allocator.free(result);
 
     // Create kernel
-    const rect_weights = try Weights.init(.rectangular, allocator, kernel.len, 0.1, null);
+    const nodes = [_]usize{kernel.len - 1};
+    const rect_weights = try Weights.init(.rectangular, allocator, &nodes, 0.1);
     defer rect_weights.deinit(allocator);
     var kernel_obj = try Kernel.init(allocator, &kernel, signal.len, rect_weights);
     defer kernel_obj.deinit(allocator);
@@ -267,7 +255,8 @@ test "kernel comparison" {
 
     // First convolution with smoothing kernel
     {
-        const rect_weights1 = try Weights.init(.rectangular, allocator, kernel1.len, 0.1, null);
+        const nodes1 = [_]usize{kernel1.len - 1};
+        const rect_weights1 = try Weights.init(.rectangular, allocator, &nodes1, 0.1);
         defer rect_weights1.deinit(allocator);
         var kernel_obj = try Kernel.init(allocator, &kernel1, signal.len, rect_weights1);
         defer kernel_obj.deinit(allocator);
@@ -278,7 +267,8 @@ test "kernel comparison" {
 
     // Second convolution with identity kernel (should return original signal)
     {
-        const rect_weights2 = try Weights.init(.rectangular, allocator, kernel2.len, 0.1, null);
+        const nodes2 = [_]usize{kernel2.len - 1};
+        const rect_weights2 = try Weights.init(.rectangular, allocator, &nodes2, 0.1);
         defer rect_weights2.deinit(allocator);
         var kernel_obj = try Kernel.init(allocator, &kernel2, signal.len, rect_weights2);
         defer kernel_obj.deinit(allocator);
@@ -294,7 +284,8 @@ test "convolution matrix creation" {
     const kernel = [_]f64{ 0.5, 0.25 };
     const signal_size = 5;
 
-    const rect_weights = try Weights.init(.rectangular, allocator, kernel.len, 0.1, null);
+    const nodes = [_]usize{kernel.len - 1};
+    const rect_weights = try Weights.init(.rectangular, allocator, &nodes, 0.1);
     defer rect_weights.deinit(allocator);
     var kernel_obj = try Kernel.init(allocator, &kernel, signal_size, rect_weights);
     defer kernel_obj.deinit(allocator);
@@ -312,7 +303,8 @@ test "Simpson weights" {
     const eqa = testing.expectApproxEqAbs;
 
     // Test Simpson weights for 5 points (4 intervals)
-    var weights = try Weights.init(.simpson, allocator, 5, 0.1, null);
+    const nodes = [_]usize{4};
+    var weights = try Weights.init(.simpson, allocator, &nodes, 0.1);
     defer weights.deinit(allocator);
 
     // Expected pattern: [1, 4, 2, 4, 1] * (0.1/3)
@@ -328,8 +320,10 @@ test "Weights join" {
     const eqa = testing.expectApproxEqAbs;
 
     // Create two weight arrays that should be concatenated at a discontinuity
-    var weights1 = try Weights.init(.simpson, allocator, 3, 0.1, null);
-    var weights2 = try Weights.init(.simpson, allocator, 3, 0.1, null);
+    const nodes1 = [_]usize{2};
+    const nodes2 = [_]usize{2};
+    var weights1 = try Weights.init(.simpson, allocator, &nodes1, 0.1);
+    var weights2 = try Weights.init(.simpson, allocator, &nodes2, 0.1);
 
     // Join them
     var combined = try join(allocator, weights1, weights2);
@@ -351,7 +345,8 @@ test "Kernel with weights" {
 
     // Create kernel values and weights (Simpson needs at least 3 points)
     const kernel_values = [_]f64{ 1.0, 0.5, 0.25 };
-    var weights = try Weights.init(.simpson, allocator, 3, 0.1, null);
+    const nodes = [_]usize{2};
+    var weights = try Weights.init(.simpson, allocator, &nodes, 0.1);
     defer weights.deinit(allocator);
 
     // Create kernel with weights applied
@@ -374,13 +369,13 @@ test "Simpson weights with kinks" {
     const eqa = testing.expectApproxEqAbs;
 
     // Test Simpson weights with a kink at index 2 (separating into two chunks)
-    // Array: [0, 1, 2, 3, 4] with kink at index 2
-    // Chunk 1: [0, 1, 2] -> Simpson: [1, 4, 1] * (0.1/3)
-    // Chunk 2: [2, 3, 4] -> Simpson: [1, 4, 1] * (0.1/3)
+    // Array: [0, 1, 2, 3, 4] with nodes at [2, 4] (0 is implicit)
+    // Chunk 1: [0, 2] -> Simpson: [1, 4, 1] * (0.1/3)
+    // Chunk 2: [2, 4] -> Simpson: [1, 4, 1] * (0.1/3)
     // Result: [0.1/3, 4*0.1/3, 2*0.1/3, 4*0.1/3, 0.1/3]
     //         (index 2 gets weight from both chunks)
-    const kink_indices = [_]usize{2};
-    var weights = try Weights.init(.simpson, allocator, 5, 0.1, &kink_indices);
+    const nodes = [_]usize{ 2, 4 };
+    var weights = try Weights.init(.simpson, allocator, &nodes, 0.1);
     defer weights.deinit(allocator);
 
     const expected = [_]f64{
@@ -400,13 +395,13 @@ test "Simpson weights with multiple kinks" {
     const allocator = testing.allocator;
     const eqa = testing.expectApproxEqAbs;
 
-    // Test with 7 points and kinks at indices 2 and 4
-    // Array: [0, 1, 2, 3, 4, 5, 6] with kinks at indices 2 and 4
-    // Chunk 1: [0, 1, 2] -> Simpson: [1, 4, 1] * (0.1/3)
-    // Chunk 2: [2, 3, 4] -> Simpson: [1, 4, 1] * (0.1/3)
-    // Chunk 3: [4, 5, 6] -> Simpson: [1, 4, 1] * (0.1/3)
-    const kink_indices = [_]usize{ 2, 4 };
-    var weights = try Weights.init(.simpson, allocator, 7, 0.1, &kink_indices);
+    // Test with 7 points and nodes at indices 2, 4, 6 (0 is implicit)
+    // Array: [0, 1, 2, 3, 4, 5, 6] with nodes at [2, 4, 6] (0 is implicit)
+    // Chunk 1: [0, 2] -> Simpson: [1, 4, 1] * (0.1/3)
+    // Chunk 2: [2, 4] -> Simpson: [1, 4, 1] * (0.1/3)
+    // Chunk 3: [4, 6] -> Simpson: [1, 4, 1] * (0.1/3)
+    const nodes = [_]usize{ 2, 4, 6 };
+    var weights = try Weights.init(.simpson, allocator, &nodes, 0.1);
     defer weights.deinit(allocator);
 
     const expected = [_]f64{
