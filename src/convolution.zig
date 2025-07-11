@@ -1,7 +1,6 @@
 const std = @import("std");
 const math = std.math;
 const testing = std.testing;
-const Allocator = std.mem.Allocator;
 const dsbmv = @import("linear/dsbmv.zig");
 const sb = @import("linear/sb.zig");
 
@@ -10,112 +9,95 @@ pub const WeightRule = enum {
     simpson, // Simpson's rule weights
 };
 
-/// Integration weights for radially symmetric convolution kernels.
+/// Integration weights vector for radially symmetric convolution kernels.
 /// This should be used with a kernel vector whose first element is the center of the kernel,
 /// and the rest are positive offsets from the center.
-pub const Weights = struct {
+pub const RadialWeights = struct {
     data: []f64,
 
     const Self = @This();
 
     pub fn init(
         comptime rule: WeightRule,
-        allocator: Allocator,
-        /// Indices of kinks and the edge of the kernel
-        nodes: []const usize,
-        /// Spacing of the kernel vector
-        h: f64,
-    ) !Weights {
-        const max_node = nodes[nodes.len - 1];
-        const n = max_node + 1;
-        const data = try allocator.alloc(f64, n);
+        allocator: std.mem.Allocator,
+        size: usize,
+        spacing: f64,
+    ) !RadialWeights {
+        const data = try allocator.alloc(f64, size);
 
         if (rule == .simpson) {
-            return try initSimpson(data, h, nodes);
+            return try simpson(data, size, spacing);
         } else if (rule == .rectangular) {
-            return try initRectangular(data);
+            return try rectangular(data);
         } else {
             unreachable;
         }
     }
 
-    fn initSimpson(
+    fn simpson(
         data: []f64,
+        n: usize,
         h: f64,
-        nodes: []const usize,
-    ) !Weights {
-        // Initialize all weights to zero
-        @memset(data, 0.0);
+    ) !RadialWeights {
+        const h_over_3: f64 = h / 3.0;
 
-        // Process each chunk directly without allocation, always starting from 0
-        var prev_node: usize = 0;
-        for (nodes) |node| {
-            const start = prev_node;
-            const end = node;
-            const chunk_len = end - start + 1;
+        // The first point is the center of the integration interval
+        var coefficient: f64 = if (n % 2 == 0) 4.0 else 2.0;
 
-            if (start == 0) {
-                // The first point is the center of the actual integration interval
-                const coefficient: f64 = if (chunk_len % 2 == 0) 4.0 else 2.0;
-                data[start] += coefficient * h / 3.0;
+        for (0..n) |i| {
+            if (i == 0) {
+                coefficient = if (n % 2 == 0) 4.0 else 2.0;
+            } else if (i == n - 1) {
+                coefficient = 1.0; // Last point always has coefficient 1
             } else {
-                data[start] += h / 3.0;
+                coefficient = if (coefficient == 4) 2.0 else 4.0;
             }
-            data[end] += h / 3.0;
-
-            for (start + 1..end) |i| {
-                const offset_in_chunk = i - start;
-                const coefficient: f64 = if (offset_in_chunk % 2 == 1) 4.0 else 2.0;
-                data[i] += coefficient * h / 3.0;
-            }
-
-            prev_node = node;
+            data[i] = coefficient * h_over_3;
         }
-
-        return Weights{ .data = data };
+        return RadialWeights{ .data = data };
     }
 
-    fn initRectangular(data: []f64) !Weights {
+    fn rectangular(data: []f64) !RadialWeights {
         // Uniform weights (all 1.0) for rectangular rule
         @memset(data, 1.0);
-        return Weights{ .data = data };
+        return RadialWeights{ .data = data };
     }
 
-    pub fn deinit(self: Self, allocator: Allocator) void {
+    pub fn deinit(self: Self, allocator: std.mem.Allocator) void {
         allocator.free(self.data);
     }
 };
 
-test "simpson_weights_single_node_1" {
-    var weights = try Weights.init(.simpson, testing.allocator, &[_]usize{1}, 3.0);
+test "simpson_weights_2" {
+    var weights = try RadialWeights.init(.simpson, testing.allocator, 2, 3.0);
     defer weights.deinit(testing.allocator);
     const expected = [_]f64{ 4.0, 1.0 };
     for (expected, weights.data) |exp, actual| try testing.expectApproxEqAbs(exp, actual, 1e-10);
 }
 
-test "simpson_weights_single_node_2" {
-    var weights = try Weights.init(.simpson, testing.allocator, &[_]usize{2}, 3.0);
+test "simpson_weights_3" {
+    var weights = try RadialWeights.init(.simpson, testing.allocator, 3, 3.0);
     defer weights.deinit(testing.allocator);
     const expected = [_]f64{ 2.0, 4.0, 1.0 };
     for (expected, weights.data) |exp, actual| try testing.expectApproxEqAbs(exp, actual, 1e-10);
 }
 
-test "simpson_weights_multiple_nodes_1" {
-    var weights = try Weights.init(.simpson, testing.allocator, &[_]usize{ 1, 3 }, 3.0);
+test "simpson_weights_4" {
+    var weights = try RadialWeights.init(.simpson, testing.allocator, 4, 3.0);
     defer weights.deinit(testing.allocator);
     const expected = [_]f64{ 4.0, 2.0, 4.0, 1.0 };
     for (expected, weights.data) |exp, actual| try testing.expectApproxEqAbs(exp, actual, 1e-10);
 }
 
-test "simpson_weights_multiple_nodes_2" {
-    var weights = try Weights.init(.simpson, testing.allocator, &[_]usize{ 2, 4 }, 3.0);
+test "simpson_weights_5" {
+    var weights = try RadialWeights.init(.simpson, testing.allocator, 5, 3.0);
     defer weights.deinit(testing.allocator);
     const expected = [_]f64{ 2.0, 4.0, 2.0, 4.0, 1.0 };
     for (expected, weights.data) |exp, actual| try testing.expectApproxEqAbs(exp, actual, 1e-10);
 }
 
-test "simpson_weights_multiple_nodes_3" {
-    var weights = try Weights.init(.simpson, testing.allocator, &[_]usize{ 1, 5 }, 3.0);
+test "simpson_weights_6" {
+    var weights = try RadialWeights.init(.simpson, testing.allocator, 6, 3.0);
     defer weights.deinit(testing.allocator);
     const expected = [_]f64{ 4.0, 2.0, 4.0, 2.0, 4.0, 1.0 };
     for (expected, weights.data) |exp, actual| try testing.expectApproxEqAbs(exp, actual, 1e-10);
@@ -132,12 +114,12 @@ pub const Kernel = struct {
     /// kernel_values contains only half spectrum (center + positive offsets)
     /// weights are applied element-wise to the kernel values
     pub fn init(
-        allocator: Allocator,
-        kernel_values: []const f64,
+        allocator: std.mem.Allocator,
+        values: []const f64,
         signal_size: usize,
-        weights: Weights,
+        weights: RadialWeights,
     ) !Self {
-        const radius = kernel_values.len - 1;
+        const radius = values.len - 1;
         var matrix = try sb.SymmetricBandMatrix.init(allocator, signal_size, radius);
         matrix.clear();
 
@@ -145,7 +127,7 @@ pub const Kernel = struct {
         for (0..signal_size) |i| {
             for (0..@min(radius + 1, signal_size - i)) |offset| {
                 const j = i + offset;
-                const weighted_value = kernel_values[offset] * weights.data[offset];
+                const weighted_value = values[offset] * weights.data[offset];
                 matrix.set(i, j, weighted_value);
             }
         }
@@ -166,7 +148,7 @@ pub const Kernel = struct {
     }
 
     /// Deinitialize and free the kernel matrix
-    pub fn deinit(self: Self, allocator: Allocator) void {
+    pub fn deinit(self: Self, allocator: std.mem.Allocator) void {
         self.matrix.deinit(allocator);
     }
 };
@@ -176,7 +158,7 @@ test "convolve_triangular_kernel" {
     const n = 17;
     const h = 1.0 / @as(f64, @floatFromInt(n - 1));
 
-    const weights = try Weights.init(.simpson, allocator, &.{n - 1}, h);
+    const weights = try RadialWeights.init(.simpson, allocator, n, h);
     defer weights.deinit(allocator);
 
     var kernel_values = try allocator.alloc(f64, n);
@@ -184,17 +166,18 @@ test "convolve_triangular_kernel" {
     for (0..n) |i| {
         kernel_values[i] = 1.0 - h * @as(f64, @floatFromInt(i));
     }
+    try testing.expectApproxEqAbs(0.0, kernel_values[n - 1], 1e-6);
 
-    const kernel = try Kernel.init(allocator, kernel_values, 2 * n, weights);
+    const kernel = try Kernel.init(allocator, kernel_values, 32, weights);
     defer kernel.deinit(allocator);
 
-    const values = try allocator.alloc(f64, 2 * n);
-    defer allocator.free(values);
-    @memset(values, 1.0);
+    const signal = try allocator.alloc(f64, 32);
+    defer allocator.free(signal);
+    @memset(signal, 1.0);
 
-    const result = try allocator.alloc(f64, 2 * n);
+    const result = try allocator.alloc(f64, 32);
     defer allocator.free(result);
 
-    kernel.convolve(values, result);
-    try testing.expectApproxEqAbs(1.0, result[n - 1], 1e-6);
+    kernel.convolve(signal, result);
+    try testing.expectApproxEqAbs(1.0, result[n - 2], 1e-6);
 }
