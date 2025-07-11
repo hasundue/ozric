@@ -69,35 +69,35 @@ pub const RadialWeights = struct {
 };
 
 test "simpson_weights_2" {
-    var weights = try RadialWeights.init(.simpson, testing.allocator, 2, 3.0);
+    const weights = try RadialWeights.init(.simpson, testing.allocator, 2, 3.0);
     defer weights.deinit(testing.allocator);
     const expected = [_]f64{ 4.0, 1.0 };
     for (expected, weights.data) |exp, actual| try testing.expectApproxEqAbs(exp, actual, 1e-10);
 }
 
 test "simpson_weights_3" {
-    var weights = try RadialWeights.init(.simpson, testing.allocator, 3, 3.0);
+    const weights = try RadialWeights.init(.simpson, testing.allocator, 3, 3.0);
     defer weights.deinit(testing.allocator);
     const expected = [_]f64{ 2.0, 4.0, 1.0 };
     for (expected, weights.data) |exp, actual| try testing.expectApproxEqAbs(exp, actual, 1e-10);
 }
 
 test "simpson_weights_4" {
-    var weights = try RadialWeights.init(.simpson, testing.allocator, 4, 3.0);
+    const weights = try RadialWeights.init(.simpson, testing.allocator, 4, 3.0);
     defer weights.deinit(testing.allocator);
     const expected = [_]f64{ 4.0, 2.0, 4.0, 1.0 };
     for (expected, weights.data) |exp, actual| try testing.expectApproxEqAbs(exp, actual, 1e-10);
 }
 
 test "simpson_weights_5" {
-    var weights = try RadialWeights.init(.simpson, testing.allocator, 5, 3.0);
+    const weights = try RadialWeights.init(.simpson, testing.allocator, 5, 3.0);
     defer weights.deinit(testing.allocator);
     const expected = [_]f64{ 2.0, 4.0, 2.0, 4.0, 1.0 };
     for (expected, weights.data) |exp, actual| try testing.expectApproxEqAbs(exp, actual, 1e-10);
 }
 
 test "simpson_weights_6" {
-    var weights = try RadialWeights.init(.simpson, testing.allocator, 6, 3.0);
+    const weights = try RadialWeights.init(.simpson, testing.allocator, 6, 3.0);
     defer weights.deinit(testing.allocator);
     const expected = [_]f64{ 4.0, 2.0, 4.0, 2.0, 4.0, 1.0 };
     for (expected, weights.data) |exp, actual| try testing.expectApproxEqAbs(exp, actual, 1e-10);
@@ -140,7 +140,7 @@ pub const Kernel = struct {
 
     /// Perform convolution with the kernel
     pub fn convolve(
-        self: *const Self,
+        self: Self,
         signal: []const f64,
         result: []f64,
     ) void {
