@@ -208,3 +208,180 @@ test "rectangular convolution simpson vs rectangular" {
     try testing.expect(max_rect_err > 3.0); // Rectangular rule has large errors
     try testing.expect(max_simp_err < 0.5); // Simpson's rule is much more accurate
 }
+
+test "simpson accuracy vs grid resolution" {
+    const allocator = testing.allocator;
+
+    // Test Simpson's rule accuracy for rect * rect convolution at different grid resolutions
+    const resolutions = [_]usize{ 17, 33, 65, 129 }; // Powers of 2 + 1 for Simpson's rule
+
+    std.debug.print("\nSimpson's rule accuracy vs grid resolution:\n", .{});
+    std.debug.print("N\tdt\tMax_Error\tL2_Error\tConv_Rate\n", .{});
+
+    var prev_max_error: f64 = 0.0;
+    var prev_dt: f64 = 0.0;
+
+    for (resolutions, 0..) |n, i| {
+        // Domain: -3.2 to 3.2, adjust dt based on n
+        const dt = 6.4 / @as(f64, @floatFromInt(n - 1));
+
+        // Create rectangular signal: f(t) = 1 for |t| ≤ 2.0, 0 otherwise
+        var signal = try allocator.alloc(f64, n);
+        defer allocator.free(signal);
+        for (0..n) |j| {
+            const t = -3.2 + @as(f64, @floatFromInt(j)) * dt;
+            signal[j] = if (@abs(t) <= 2.0) 1.0 else 0.0;
+        }
+
+        // Create rectangular kernel: g(t) = 1 for |t| ≤ 1.6, 0 otherwise
+        // Scale kernel size based on dt to maintain same physical size
+        const kernel_half_width = @as(usize, @intFromFloat(1.6 / dt));
+        // Ensure odd number of points for Simpson's rule
+        const actual_kernel_size = if (kernel_half_width % 2 == 0) kernel_half_width + 1 else kernel_half_width;
+
+        var rect_kernel = try allocator.alloc(f64, actual_kernel_size);
+        defer allocator.free(rect_kernel);
+        for (0..rect_kernel.len) |j| {
+            const t = @as(f64, @floatFromInt(j)) * dt;
+            rect_kernel[j] = if (t <= 1.6) 1.0 else 0.0;
+        }
+
+        const result_simpson = try allocator.alloc(f64, n);
+        defer allocator.free(result_simpson);
+
+        // Simpson's rule convolution
+        {
+            const nodes = [_]usize{rect_kernel.len - 1};
+            const weights = try Weights.init(.simpson, allocator, &nodes, dt);
+            defer weights.deinit(allocator);
+            var kernel = try Kernel.init(allocator, rect_kernel, n, weights);
+            defer kernel.deinit(allocator);
+            kernel.convolve(signal, result_simpson);
+        }
+
+        // Analytical solution: triangular function
+        var analytical = try allocator.alloc(f64, n);
+        defer allocator.free(analytical);
+        for (0..n) |j| {
+            const t = -3.2 + @as(f64, @floatFromInt(j)) * dt;
+            if (@abs(t) <= 3.6) {
+                analytical[j] = 3.6 - @abs(t);
+            } else {
+                analytical[j] = 0.0;
+            }
+        }
+
+        // Compute errors
+        var max_error: f64 = 0.0;
+        var l2_error: f64 = 0.0;
+        for (0..n) |j| {
+            const err = @abs(result_simpson[j] - analytical[j]);
+            max_error = @max(max_error, err);
+            l2_error += err * err;
+        }
+        l2_error = @sqrt(l2_error / @as(f64, @floatFromInt(n)));
+
+        // Compute convergence rate (should be ~4th order for Simpson's rule)
+        var convergence_rate: f64 = 0.0;
+        if (i > 0 and prev_max_error > 0.0) {
+            const dt_ratio = prev_dt / dt;
+            convergence_rate = @log(prev_max_error / max_error) / @log(dt_ratio);
+        }
+
+        std.debug.print("{d}\t{d:.3}\t{d:.3}\t{d:.3}\t{d:.2}\n", .{ n, dt, max_error, l2_error, convergence_rate });
+
+        prev_max_error = max_error;
+        prev_dt = dt;
+    }
+
+    std.debug.print("Note: Convergence rate should approach 4.0 for Simpson's rule\n", .{});
+}
+
+test "simpson gaussian convolution convergence" {
+    const allocator = testing.allocator;
+
+    // Test Simpson's rule accuracy for Gaussian * Gaussian convolution at different grid resolutions
+    // Gaussian convolution is perfectly smooth and should show 4th-order convergence
+    const resolutions = [_]usize{ 17, 33, 65, 129 }; // Powers of 2 + 1 for Simpson's rule
+
+    std.debug.print("\nSimpson's rule for Gaussian * Gaussian convolution:\n", .{});
+    std.debug.print("N\tdt\tMax_Error\tL2_Error\tConv_Rate\n", .{});
+
+    var prev_max_error: f64 = 0.0;
+    var prev_dt: f64 = 0.0;
+
+    for (resolutions, 0..) |n, i| {
+        // Domain: -4.0 to 4.0, adjust dt based on n
+        const dt = 8.0 / @as(f64, @floatFromInt(n - 1));
+
+        // Create Gaussian signal: f(t) = exp(-t²/2σ²), σ = 1.0
+        var signal = try allocator.alloc(f64, n);
+        defer allocator.free(signal);
+        for (0..n) |j| {
+            const t = -4.0 + @as(f64, @floatFromInt(j)) * dt;
+            signal[j] = @exp(-0.5 * t * t); // σ = 1.0
+        }
+
+        // Create Gaussian kernel: g(t) = exp(-t²/2σ²), σ = 0.8
+        // Scale kernel size to cover ~3σ = 2.4
+        const kernel_half_width = @as(usize, @intFromFloat(2.4 / dt));
+        // Ensure odd number of points for Simpson's rule
+        const actual_kernel_size = if (kernel_half_width % 2 == 0) kernel_half_width + 1 else kernel_half_width;
+
+        var gauss_kernel = try allocator.alloc(f64, actual_kernel_size);
+        defer allocator.free(gauss_kernel);
+        for (0..gauss_kernel.len) |j| {
+            const t = @as(f64, @floatFromInt(j)) * dt;
+            gauss_kernel[j] = @exp(-0.5 * t * t / (0.8 * 0.8)); // σ = 0.8
+        }
+
+        const result_simpson = try allocator.alloc(f64, n);
+        defer allocator.free(result_simpson);
+
+        // Simpson's rule convolution
+        {
+            const nodes = [_]usize{gauss_kernel.len - 1};
+            const weights = try Weights.init(.simpson, allocator, &nodes, dt);
+            defer weights.deinit(allocator);
+            var kernel = try Kernel.init(allocator, gauss_kernel, n, weights);
+            defer kernel.deinit(allocator);
+            kernel.convolve(signal, result_simpson);
+        }
+
+        // Analytical solution: Gaussian * Gaussian = Gaussian with σ_result = √(σ₁² + σ₂²)
+        // For σ₁ = 1.0, σ₂ = 0.8: σ_result = √(1.0 + 0.64) = √1.64 ≈ 1.281
+        const sigma_result = @sqrt(1.0 + 0.8 * 0.8);
+        const amplitude = @sqrt(2.0 * math.pi) * 0.8; // Normalization factor
+
+        var analytical = try allocator.alloc(f64, n);
+        defer allocator.free(analytical);
+        for (0..n) |j| {
+            const t = -4.0 + @as(f64, @floatFromInt(j)) * dt;
+            analytical[j] = amplitude * @exp(-0.5 * t * t / (sigma_result * sigma_result));
+        }
+
+        // Compute errors
+        var max_error: f64 = 0.0;
+        var l2_error: f64 = 0.0;
+        for (0..n) |j| {
+            const err = @abs(result_simpson[j] - analytical[j]);
+            max_error = @max(max_error, err);
+            l2_error += err * err;
+        }
+        l2_error = @sqrt(l2_error / @as(f64, @floatFromInt(n)));
+
+        // Compute convergence rate (should approach 4.0 for smooth functions)
+        var convergence_rate: f64 = 0.0;
+        if (i > 0 and prev_max_error > 0.0) {
+            const dt_ratio = prev_dt / dt;
+            convergence_rate = @log(prev_max_error / max_error) / @log(dt_ratio);
+        }
+
+        std.debug.print("{d}\t{d:.3}\t{d:.3}\t{d:.3}\t{d:.2}\n", .{ n, dt, max_error, l2_error, convergence_rate });
+
+        prev_max_error = max_error;
+        prev_dt = dt;
+    }
+
+    std.debug.print("Note: Convergence rate should approach 4.0 for smooth Gaussian functions\n", .{});
+}
