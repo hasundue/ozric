@@ -82,6 +82,19 @@ pub fn build(b: *std.Build) void {
         step.dependOn(&run.step);
     }
 
+    // Integration tests
+    {
+        const step = b.step("test-integration", "Run integration tests");
+        const integration_tests = b.addTest(.{
+            .root_source_file = b.path("tests/convolution.zig"),
+            .target = target,
+            .optimize = optimize,
+        });
+        integration_tests.root_module.addImport("convolution", lib.module);
+        const run = b.addRunArtifact(integration_tests);
+        step.dependOn(&run.step);
+    }
+
     // WASM step
     {
         const wasm_step = b.step("wasm", "Build WASM using Emscripten");

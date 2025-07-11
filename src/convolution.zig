@@ -165,51 +165,6 @@ pub const Kernel = struct {
     }
 };
 
-/// Benchmarking function for convolution using dsbmv
-pub fn benchmark_convolution(allocator: Allocator) !void {
-    const sizes = [_]usize{ 100, 500, 1000, 5000 };
-    const kernel_radius = 10;
-
-    for (sizes) |size| {
-        var signal = try allocator.alloc(f64, size);
-        defer allocator.free(signal);
-
-        const result = try allocator.alloc(f64, size);
-        defer allocator.free(result);
-
-        var kernel = try allocator.alloc(f64, kernel_radius + 1);
-        defer allocator.free(kernel);
-
-        // Generation of Gaussian kernel (half spectrum)
-        for (0..kernel_radius + 1) |i| {
-            const x = @as(f64, @floatFromInt(i));
-            kernel[i] = math.exp(-0.5 * x * x);
-        }
-
-        // Generation of test data
-        for (0..size) |i| {
-            signal[i] = @sin(@as(f64, @floatFromInt(i)) * 0.1);
-        }
-
-        // Create kernel and execute benchmark
-        const nodes = [_]usize{kernel.len - 1};
-        const rect_weights = try Weights.init(.rectangular, allocator, &nodes, 0.1);
-        defer rect_weights.deinit(allocator);
-        var kernel_obj = try Kernel.init(allocator, kernel, size, rect_weights);
-        defer kernel_obj.deinit(allocator);
-
-        const start_time = std.time.nanoTimestamp();
-
-        kernel_obj.convolve(signal, result);
-
-        const end_time = std.time.nanoTimestamp();
-        const elapsed_ns = @as(f64, @floatFromInt(end_time - start_time));
-        const elapsed_ms = elapsed_ns / 1_000_000.0;
-
-        std.debug.print("Size: {}, Time: {d:.2} ms\n", .{ size, elapsed_ms });
-    }
-}
-
 test "convolution test" {
     const allocator = testing.allocator;
 
