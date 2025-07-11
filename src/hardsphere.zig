@@ -5,6 +5,9 @@ const conv = @import("convolution.zig");
 
 const Grid = @import("grid.zig").Grid;
 
+/// Number of grid points per diameter for optimal discretization
+const GRID_PPD: usize = 16;
+
 /// Weight function with its theoretical radius
 pub const WeightFunction = struct {
     ptr: *const fn (HardSphereDFT, f64) f64,
@@ -20,19 +23,15 @@ pub const HardSphereDFT = struct {
     /// Hard-sphere diameter
     diameter: f64,
 
-    /// Number of grid points per diameter for optimal discretization
-    points_per_diameter: usize,
-
     /// Pre-calculated optimal grid spacing that aligns diameter with a grid point
     resolution: f64,
 
     const Self = @This();
 
-    pub fn init(diameter: f64, points_per_diameter: usize) Self {
-        const resolution = diameter / @as(f64, @floatFromInt(points_per_diameter));
+    pub fn init(diameter: f64) Self {
+        const resolution = diameter / @as(f64, @floatFromInt(GRID_PPD));
         return Self{
             .diameter = diameter,
-            .points_per_diameter = points_per_diameter,
             .resolution = resolution,
         };
     }
@@ -114,26 +113,25 @@ pub const HardSphereDFT = struct {
 };
 
 test "HardSphereDFT init" {
-    const hs = HardSphereDFT.init(1.0, 10);
+    const hs = HardSphereDFT.init(1.0);
     try t.expectEqual(@as(f64, 1.0), hs.diameter);
-    try t.expectEqual(@as(usize, 10), hs.points_per_diameter);
-    try t.expectEqual(@as(f64, 0.1), hs.resolution);
+    try t.expectEqual(@as(f64, 1.0 / 16.0), hs.resolution);
 }
 
 test "HardSphereDFT optimal spacing calculation" {
-    const hs = HardSphereDFT.init(1.0, 10);
+    const hs = HardSphereDFT.init(1.0);
 
-    // With diameter=1.0 and points_per_diameter=10, resolution should be 0.1
-    try t.expectEqual(@as(f64, 0.1), hs.resolution);
+    // With diameter=1.0 and GRID_PPD=16, resolution should be 1.0/16
+    try t.expectEqual(@as(f64, 1.0 / 16.0), hs.resolution);
 
     // Verify that the hard sphere diameter falls exactly on a grid point
-    // At resolution=0.1, diameter=1.0 should be at grid index 10
+    // At resolution=1.0/16, diameter=1.0 should be at grid index 16
     const diameter_grid_index = @as(usize, @intFromFloat(hs.diameter / hs.resolution));
-    try t.expectEqual(@as(usize, 10), diameter_grid_index);
+    try t.expectEqual(@as(usize, 16), diameter_grid_index);
 }
 
 test "HardSphereDFT weightFn1" {
-    const hs = HardSphereDFT.init(1.0, 10);
+    const hs = HardSphereDFT.init(1.0);
 
     try t.expectApproxEqAbs(0.90724, hs.weightFn1(0), 1e-5);
 
@@ -236,7 +234,7 @@ pub const HardSphereKernel = struct {
 
 test "HardSphereKernel init" {
     const allocator = t.allocator;
-    const hs = HardSphereDFT.init(1.0, 10);
+    const hs = HardSphereDFT.init(1.0);
     var grid = try Grid.init(allocator, hs.resolution, 5.0);
     defer grid.deinit();
     var kernel = try HardSphereKernel.init(allocator, grid, hs);
@@ -326,7 +324,7 @@ pub const HardSphereWorkspace = struct {
 
 test "HardSphereWorkspace init" {
     const allocator = t.allocator;
-    const hs = HardSphereDFT.init(1.0, 10);
+    const hs = HardSphereDFT.init(1.0);
     var grid = try Grid.init(allocator, hs.resolution, 5.0);
     defer grid.deinit();
     var workspace = try HardSphereWorkspace.init(allocator, grid, hs);
