@@ -25,7 +25,7 @@ pub const SymmetricBandMatrix = struct {
     }
 
     /// Deinitialize and free the matrix data
-    pub fn deinit(self: *Self, allocator: Allocator) void {
+    pub fn deinit(self: Self, allocator: Allocator) void {
         allocator.free(self.data);
     }
 

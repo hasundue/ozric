@@ -26,23 +26,19 @@ pub const Weights = struct {
         const data = try allocator.alloc(f64, n);
 
         if (rule == .simpson) {
-            return try initSimpsonWeights(data, h, nodes);
+            return try initSimpson(data, h, nodes);
         } else if (rule == .rectangular) {
-            return try initRectangularWeights(data);
+            return try initRectangular(data);
         } else {
             unreachable;
         }
     }
 
-    fn initSimpsonWeights(
+    fn initSimpson(
         data: []f64,
         h: f64,
         nodes: []const usize,
     ) !Weights {
-        const n = data.len;
-        if (n < 3) return error.InsufficientPoints;
-        if ((n - 1) % 2 != 0) return error.OddIntervals; // n-1 intervals must be even
-
         // Initialize all weights to zero
         @memset(data, 0.0);
 
@@ -53,20 +49,13 @@ pub const Weights = struct {
             const end = node;
             const chunk_len = end - start + 1;
 
-            if (chunk_len < 3) {
-                prev_node = node;
-                continue; // Skip chunks too small for Simpson's rule
-            }
-
-            // Check if chunk has even number of intervals (odd number of points)
-            const intervals = chunk_len - 1;
-            if (intervals % 2 != 0) {
-                prev_node = node;
-                continue; // Skip chunks with odd intervals
-            }
+            if (chunk_len < 3) return error.InsufficientPoints;
+            if ((chunk_len - 1) % 2 != 0) return error.OddIntervals;
 
             // Apply Simpson's rule: [1, 4, 2, 4, 2, ..., 4, 1] * h/3
-            data[start] += h / 3.0;
+            // Note that the first point is the center of the actual integration interval
+            const center_coefficient: f64 = if (chunk_len % 2 == 0) 4.0 else 2.0;
+            data[start] += center_coefficient * h / 3.0;
             data[end] += h / 3.0;
 
             for (start + 1..end) |i| {
@@ -81,7 +70,7 @@ pub const Weights = struct {
         return Weights{ .data = data };
     }
 
-    fn initRectangularWeights(data: []f64) !Weights {
+    fn initRectangular(data: []f64) !Weights {
         // Uniform weights (all 1.0) for rectangular rule
         @memset(data, 1.0);
         return Weights{ .data = data };
@@ -160,10 +149,38 @@ pub const Kernel = struct {
     }
 
     /// Deinitialize and free the kernel matrix
-    pub fn deinit(self: *Self, allocator: Allocator) void {
+    pub fn deinit(self: Self, allocator: Allocator) void {
         self.matrix.deinit(allocator);
     }
 };
+
+test "triangular_kernel" {
+    const allocator = testing.allocator;
+    const n = 17;
+    const h = 1.0 / @as(f64, @floatFromInt(n - 1));
+
+    const weights = try Weights.init(.simpson, allocator, &.{n - 1}, h);
+    defer weights.deinit(allocator);
+
+    var kernel_values = try allocator.alloc(f64, n);
+    defer allocator.free(kernel_values);
+    for (0..n) |i| {
+        kernel_values[i] = 1.0 - h * @as(f64, @floatFromInt(i));
+    }
+
+    const kernel = try Kernel.init(allocator, kernel_values, 2 * n, weights);
+    defer kernel.deinit(allocator);
+
+    const values = try allocator.alloc(f64, 2 * n);
+    defer allocator.free(values);
+    @memset(values, 1.0);
+
+    const result = try allocator.alloc(f64, 2 * n);
+    defer allocator.free(result);
+
+    kernel.convolve(values, result);
+    try testing.expectApproxEqAbs(1.0, result[n - 1], 1e-6);
+}
 
 test "convolution test" {
     const allocator = testing.allocator;
