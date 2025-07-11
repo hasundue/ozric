@@ -114,3 +114,97 @@ test "delta convolution simpson vs rectangular" {
         try eqa(expected, actual, 1e-10);
     }
 }
+
+test "rectangular convolution simpson vs rectangular" {
+    const allocator = testing.allocator;
+
+    // Test convolution of two rectangular functions
+    // Both signal and kernel are smooth, so Simpson's rule should be more accurate
+    const dt = 0.1;
+    const n = 65; // Increased grid resolution for better accuracy testing
+
+    // Create rectangular signal: f(t) = 1 for |t| ≤ 2.0, 0 otherwise
+    // Domain extends from -3.2 to 3.2 with dt=0.1 for n=65
+    // Stretch signal to better utilize the grid
+    var signal = try allocator.alloc(f64, n);
+    defer allocator.free(signal);
+    for (0..n) |i| {
+        const t = -3.2 + @as(f64, @floatFromInt(i)) * dt;
+        signal[i] = if (@abs(t) <= 2.0) 1.0 else 0.0;
+    }
+
+    // Create rectangular kernel: g(t) = 1 for |t| ≤ 1.6, 0 otherwise
+    // Half-spectrum representation: [g(0), g(dt), g(2*dt), ...]
+    // Stretch kernel to better utilize the grid resolution
+    // Need odd number of points for Simpson's rule (even number of intervals)
+    const kernel_half_width = 16; // 1.6/0.1 = 16 points, giving 17 total points
+    var rect_kernel = try allocator.alloc(f64, kernel_half_width + 1);
+    defer allocator.free(rect_kernel);
+    for (0..rect_kernel.len) |i| {
+        const t = @as(f64, @floatFromInt(i)) * dt;
+        rect_kernel[i] = if (t <= 1.6) 1.0 else 0.0;
+    }
+
+    const result_rect = try allocator.alloc(f64, n);
+    defer allocator.free(result_rect);
+    const result_simpson = try allocator.alloc(f64, n);
+    defer allocator.free(result_simpson);
+
+    // Rectangular rule
+    {
+        const nodes = [_]usize{rect_kernel.len - 1};
+        const weights = try Weights.init(.rectangular, allocator, &nodes, dt);
+        defer weights.deinit(allocator);
+        var kernel = try Kernel.init(allocator, rect_kernel, n, weights);
+        defer kernel.deinit(allocator);
+        kernel.convolve(signal, result_rect);
+    }
+
+    // Simpson's rule
+    {
+        const nodes = [_]usize{rect_kernel.len - 1};
+        const weights = try Weights.init(.simpson, allocator, &nodes, dt);
+        defer weights.deinit(allocator);
+        var kernel = try Kernel.init(allocator, rect_kernel, n, weights);
+        defer kernel.deinit(allocator);
+        kernel.convolve(signal, result_simpson);
+    }
+
+    // Analytical solution: convolution of two rectangles is a triangular function
+    // For rect(-2.0,2.0) * rect(-1.6,1.6), the result is triangular with max at t=0
+    // and width 3.6 (sum of half-widths: 2.0 + 1.6 = 3.6)
+    var analytical = try allocator.alloc(f64, n);
+    defer allocator.free(analytical);
+    for (0..n) |i| {
+        const t = -3.2 + @as(f64, @floatFromInt(i)) * dt;
+        if (@abs(t) <= 3.6) {
+            analytical[i] = 3.6 - @abs(t); // triangular function
+        } else {
+            analytical[i] = 0.0;
+        }
+    }
+
+    // Print comparison
+    std.debug.print("\nRectangular convolution: rect(-2.0,2.0) * rect(-1.6,1.6)\n", .{});
+    std.debug.print("t\tAnalytical\tRect\tSimpson\tRect_err\tSimp_err\n", .{});
+    var max_rect_err: f64 = 0.0;
+    var max_simp_err: f64 = 0.0;
+    for (0..n) |i| {
+        const t = -3.2 + @as(f64, @floatFromInt(i)) * dt;
+        const expected = analytical[i];
+        const rect_err = @abs(result_rect[i] - expected);
+        const simp_err = @abs(result_simpson[i] - expected);
+        max_rect_err = @max(max_rect_err, rect_err);
+        max_simp_err = @max(max_simp_err, simp_err);
+        std.debug.print("{d:.1}\t{d:.3}\t\t{d:.3}\t{d:.3}\t{d:.3}\t{d:.3}\n", .{ t, expected, result_rect[i], result_simpson[i], rect_err, simp_err });
+    }
+
+    std.debug.print("Max errors: Rectangular={d:.3}, Simpson={d:.3}\n", .{ max_rect_err, max_simp_err });
+
+    // Simpson's rule should be more accurate for smooth functions
+    try testing.expect(max_simp_err < max_rect_err);
+
+    // Verify the dramatic improvement in accuracy
+    try testing.expect(max_rect_err > 3.0); // Rectangular rule has large errors
+    try testing.expect(max_simp_err < 0.5); // Simpson's rule is much more accurate
+}
