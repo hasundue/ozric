@@ -148,11 +148,11 @@ test "HardSphereDFT weightFn1" {
     try t.expect(hs.weightFn1(2.5) < 0);
 }
 
-pub const HardSphereKernel = struct {
+const WeightIntegral = struct {
     /// The expansion coefficients of density-independent weights over the grid
     /// combinations, or w_i(|r - r'|)
     /// [0]: weightFn0, [1]: weightFn1 (unified), [2]: weightFn2
-    weights: [3]conv.Kernel,
+    kernels: [3]conv.Kernel,
 
     /// Reference to the grid
     grid: Grid,
@@ -203,7 +203,7 @@ pub const HardSphereKernel = struct {
         }
 
         return Self{
-            .weights = kernels,
+            .kernels = kernels,
             .grid = grid,
             .hs = hs,
             .allocator = allocator,
@@ -213,17 +213,17 @@ pub const HardSphereKernel = struct {
     pub fn deinit(self: *Self) void {
         // Free weight kernels
         for (0..3) |i| {
-            self.weights[i].deinit(self.allocator);
+            self.kernels[i].deinit(self.allocator);
         }
     }
 };
 
-test "HardSphereKernel init" {
+test "WeightIntegral init" {
     const allocator = t.allocator;
     const hs = HardSphereDFT.init(1.0);
     var grid = try Grid.init(allocator, hs.resolution, 5.0);
     defer grid.deinit();
-    var kernel = try HardSphereKernel.init(allocator, grid, hs);
+    var kernel = try WeightIntegral.init(allocator, grid, hs);
     defer kernel.deinit();
 }
 
