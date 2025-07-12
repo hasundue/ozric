@@ -73,8 +73,6 @@ test "HardSphereDFT init" {
 }
 
 const WeightIntegral = struct {
-    /// The expansion coefficients of density-independent weights over the grid
-    /// combinations, or w_i(|r - r'|), weighted by integration weights
     kernels: [3]conv.RadialKernel,
 
     const Self = @This();
@@ -118,6 +116,62 @@ test "WeightIntegral init" {
 
     var kernel = try WeightIntegral.init(allocator, hs, grid);
     defer kernel.deinit(allocator);
+}
+
+const WeightedDensity = struct {
+    density: []f64,
+    expansion: [3][]f64,
+
+    const Self = @This();
+
+    pub fn init(allocator: std.mem.Allocator, grid: Grid) !Self {
+        const n = grid.points.len;
+        var expansion: [3][]f64 = undefined;
+        for (0..3) |i| expansion[i] = try allocator.alloc(f64, n);
+        return Self{
+            .density = try allocator.alloc(f64, n),
+            .expansion = expansion,
+        };
+    }
+
+    pub fn deinit(self: *Self, allocator: std.mem.Allocator) void {
+        allocator.free(self.density);
+        for (0..3) |i| allocator.free(self.expansion[i]);
+    }
+
+    pub fn update(
+        self: Self,
+        density: []const f64,
+        integral: WeightIntegral,
+    ) void {
+        // const n = self.density.len;
+        // const size = integral.kernels[0].size;
+
+        inline for (0..3) |i| {
+            integral.kernels[i].convolve(density, self.expansion[i]);
+        }
+    }
+};
+
+test "WeightedDensity" {
+    const allocator = t.allocator;
+
+    const dft = try HardSphereDFT.init(allocator, 1.0);
+    defer dft.deinit(allocator);
+
+    const grid = try Grid.init(allocator, dft.resolution, 5.0);
+    defer grid.deinit();
+
+    const integral = try WeightIntegral.init(allocator, dft, grid);
+    defer integral.deinit(allocator);
+
+    const weighted = try WeightedDensity.init(allocator, grid);
+    defer weighted.deinit(allocator);
+
+    try t.expectEqual(grid.points.len, weighted.density.len);
+    for (0..3) |i| {
+        try t.expectEqual(grid.points.len, weighted.expansion[i].len);
+    }
 }
 
 pub const HardSphereWorkspace = struct {
