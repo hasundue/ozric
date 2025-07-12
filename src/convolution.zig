@@ -104,7 +104,7 @@ test "simpson_weights_6" {
 }
 
 /// Convolution kernel for symmetric band matrix operations
-pub const Kernel = struct {
+pub const RadialKernel = struct {
     matrix: sb.SymmetricBandMatrix,
     radius: usize,
 
@@ -169,7 +169,7 @@ test "convolve_triangular_kernel" {
     }
     try testing.expectApproxEqAbs(0.0, kernel_values[r], 1e-6);
 
-    const kernel = try Kernel.init(allocator, kernel_values, 2 * r, weights);
+    const kernel = try RadialKernel.init(allocator, kernel_values, 2 * r, weights);
     defer kernel.deinit(allocator);
 
     const signal = try allocator.alloc(f64, 2 * r);

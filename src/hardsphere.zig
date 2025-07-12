@@ -75,12 +75,12 @@ test "HardSphereDFT init" {
 const WeightIntegral = struct {
     /// The expansion coefficients of density-independent weights over the grid
     /// combinations, or w_i(|r - r'|), weighted by integration weights
-    kernels: [3]conv.Kernel,
+    kernels: [3]conv.RadialKernel,
 
     const Self = @This();
 
     pub fn init(allocator: std.mem.Allocator, hs: HardSphereDFT, grid: Grid) !Self {
-        var kernels: [3]conv.Kernel = undefined;
+        var kernels: [3]conv.RadialKernel = undefined;
         for (0..3) |i| {
             const simpson_weights = try conv.RadialWeights.init(
                 .simpson,
@@ -90,7 +90,7 @@ const WeightIntegral = struct {
             );
             defer simpson_weights.deinit(allocator);
 
-            kernels[i] = try conv.Kernel.init(
+            kernels[i] = try conv.RadialKernel.init(
                 allocator,
                 hs.weight_functions[i],
                 grid.points.len,
@@ -101,7 +101,6 @@ const WeightIntegral = struct {
     }
 
     pub fn deinit(self: Self, allocator: std.mem.Allocator) void {
-        // Free weight kernels
         for (0..3) |i| {
             self.kernels[i].deinit(allocator);
         }
