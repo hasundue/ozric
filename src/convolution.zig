@@ -155,8 +155,9 @@ pub const Kernel = struct {
 
 test "convolve_triangular_kernel" {
     const allocator = testing.allocator;
-    const n = 17;
-    const h = 1.0 / @as(f64, @floatFromInt(n - 1));
+    const r = 16;
+    const h = 1.0 / @as(f64, @floatFromInt(r));
+    const n = r + 1;
 
     const weights = try RadialWeights.init(.simpson, allocator, n, h);
     defer weights.deinit(allocator);
@@ -166,18 +167,18 @@ test "convolve_triangular_kernel" {
     for (0..n) |i| {
         kernel_values[i] = 1.0 - h * @as(f64, @floatFromInt(i));
     }
-    try testing.expectApproxEqAbs(0.0, kernel_values[n - 1], 1e-6);
+    try testing.expectApproxEqAbs(0.0, kernel_values[r], 1e-6);
 
-    const kernel = try Kernel.init(allocator, kernel_values, 32, weights);
+    const kernel = try Kernel.init(allocator, kernel_values, 2 * r, weights);
     defer kernel.deinit(allocator);
 
-    const signal = try allocator.alloc(f64, 32);
+    const signal = try allocator.alloc(f64, 2 * r);
     defer allocator.free(signal);
     @memset(signal, 1.0);
 
-    const result = try allocator.alloc(f64, 32);
+    const result = try allocator.alloc(f64, 2 * r);
     defer allocator.free(result);
 
     kernel.convolve(signal, result);
-    try testing.expectApproxEqAbs(1.0, result[n - 2], 1e-6);
+    try testing.expectApproxEqAbs(1.0, result[r - 1], 1e-6);
 }

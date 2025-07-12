@@ -5,16 +5,8 @@ const conv = @import("convolution.zig");
 
 const Grid = @import("grid.zig").Grid;
 
-/// Number of grid points per diameter for optimal discretization
-const GRID_PPD: usize = 16;
-
-/// Weight function with its grid node indices
-pub const WeightFunction = struct {
-    ptr: *const fn (HardSphereDFT, f64) f64,
-
-    /// Grid node distances relative to the hard sphere diameter
-    /// Array ends at the cutoff radius, with kinks as intermediate points
-    nodes: []const usize,
+pub const HardSphereOptions = struct {
+    min_resolution: f64,
 };
 
 pub const HardSphereDFT = struct {
@@ -24,207 +16,109 @@ pub const HardSphereDFT = struct {
     /// Pre-calculated optimal grid spacing that aligns diameter with a grid point
     resolution: f64,
 
+    /// Relative diameter of hard sphere to the resolution
+    size: usize,
+
+    /// Descritized weight functions over the grid
+    weight_functions: [3][]f64,
+
     const Self = @This();
 
-    pub fn init(diameter: f64) Self {
-        const resolution = diameter / @as(f64, @floatFromInt(GRID_PPD));
+    /// Number of grid points per diameter for optimal discretization
+    const GRID_PPD = 16;
+
+    pub fn init(
+        allocator: std.mem.Allocator,
+        diameter: f64,
+    ) !Self {
+        const size = GRID_PPD;
+        const resolution: f64 = diameter / @as(f64, size);
+
+        const weights = .{ weightFn0, weightFn1, weightFn2 };
+        var weight_functions: [3][]f64 = undefined;
+        inline for (0..3) |i| {
+            const support = if (i == 1) 2 else 1;
+            weight_functions[i] = try allocator.alloc(f64, size * support + 1);
+            for (0..weight_functions[i].len) |j| {
+                const r = @as(f64, @floatFromInt(j)) * resolution;
+                weight_functions[i][j] = weights[i](diameter, r);
+            }
+        }
+
         return Self{
             .diameter = diameter,
             .resolution = resolution,
+            .size = size,
+            .weight_functions = weight_functions,
         };
     }
 
-    /// Get weight functions with precalculated grid node indices
-    pub fn getWeightFns(self: Self) [3]WeightFunction {
-        _ = self; // Weight functions are normalized, diameter doesn't affect node indices
-        return [_]WeightFunction{
-            .{ .ptr = weightFn0, .nodes = &[_]usize{1} }, // 0 to 1σ (0 is implicit)
-            .{ .ptr = weightFn1, .nodes = &[_]usize{ 1, 2 } }, // 0 to 2σ with kink at 1σ (0 is implicit)
-            .{ .ptr = weightFn2, .nodes = &[_]usize{1} }, // 0 to 1σ (0 is implicit)
-        };
-    }
-
-    pub fn weightFn0(self: Self, r: f64) f64 {
-        if (r > self.diameter) return 0.0;
-
-        const sigma3 = math.pow(f64, self.diameter, 3);
-        const pi = math.pi;
-
-        return 3 / (4 * pi * sigma3);
-    }
-
-    pub fn weightFn1(hs: HardSphereDFT, r: f64) f64 {
-        if (r < hs.diameter) {
-            return hs.weightFn1core(r);
-        } else {
-            return hs.weightFn1tail(r);
+    pub fn deinit(self: Self, allocator: std.mem.Allocator) void {
+        for (0..3) |i| {
+            allocator.free(self.weight_functions[i]);
         }
-    }
-
-    // The first order weight function inside the hard sphere
-    pub fn weightFn1core(self: Self, r: f64) f64 {
-        if (r > self.diameter) return 0.0;
-
-        const x = r / self.diameter;
-        const x2 = math.pow(f64, x, 2);
-
-        const a_0 = 0.90724;
-        const a_1 = -1.23717;
-        const a_2 = 0.21616;
-
-        return a_0 + a_1 * x + a_2 * x2;
-    }
-
-    /// The second order weight function outside the hard sphere
-    pub fn weightFn1tail(self: Self, r: f64) f64 {
-        if (r < self.diameter) return 0.0;
-
-        const x = r / self.diameter;
-        const x2 = math.pow(f64, x, 2);
-        const x3 = math.pow(f64, x, 3);
-
-        const c = -0.10244;
-        const b_0 = 35.134;
-        const alpha = 4.934;
-        const b_1 = -98.684;
-        const beta_1 = 3.5621;
-        const b_2 = 92.693;
-        const beta_2 = 12.0;
-        const b_3 = -29.257;
-
-        const first = c * @exp(-beta_1 * (x - 1.0)) * @sin(alpha * (x - 1.0));
-        const second = @exp(-beta_2 * (x - 1.0)) * (b_0 + b_1 * x + b_2 * x2 + b_3 * x3);
-
-        return first + second;
-    }
-
-    pub fn weightFn2(self: Self, r: f64) f64 {
-        if (r >= self.diameter) return 0.0;
-
-        const x = r / self.diameter;
-        const x2 = x * x;
-        const pi = math.pi;
-
-        return (15.0 / 8.0 / pi / self.diameter) * (1 - 3 * x + 3 * x2);
     }
 };
 
 test "HardSphereDFT init" {
-    const hs = HardSphereDFT.init(1.0);
-    try t.expectEqual(@as(f64, 1.0), hs.diameter);
-    try t.expectEqual(@as(f64, 1.0 / 16.0), hs.resolution);
-}
+    const hs = try HardSphereDFT.init(t.allocator, 1.0);
+    defer hs.deinit(t.allocator);
 
-test "HardSphereDFT optimal spacing calculation" {
-    const hs = HardSphereDFT.init(1.0);
-
-    // With diameter=1.0 and GRID_PPD=16, resolution should be 1.0/16
-    try t.expectEqual(@as(f64, 1.0 / 16.0), hs.resolution);
-
-    // Verify that the hard sphere diameter falls exactly on a grid point
-    // At resolution=1.0/16, diameter=1.0 should be at grid index 16
-    const diameter_grid_index = @as(usize, @intFromFloat(hs.diameter / hs.resolution));
-    try t.expectEqual(@as(usize, 16), diameter_grid_index);
-}
-
-test "HardSphereDFT weightFn1" {
-    const hs = HardSphereDFT.init(1.0);
-
-    try t.expectApproxEqAbs(0.90724, hs.weightFn1(0), 1e-5);
-
-    // Should be positive deep inside the sphere
-    try t.expect(hs.weightFn1(0.5) > 0);
-
-    // Should be negative at contact distance
-    try t.expect(hs.weightFn1(1.0) < 0);
-
-    // Test continuity at contact distance
-    const eps = 1e-6;
-    try t.expectApproxEqAbs(hs.weightFn1(1.0 - eps), hs.weightFn1(1.0 + eps), 1e-3);
-
-    // Test oscillating structure of the tail
-    try t.expect(hs.weightFn1(1.5) < 0);
-    try t.expect(hs.weightFn1(2.0) > 0);
-    try t.expect(hs.weightFn1(2.5) < 0);
+    try t.expectEqual(1.0, hs.diameter);
+    try t.expectEqual(1.0 / 16.0, hs.resolution);
+    try t.expectEqual(16, hs.size);
+    try t.expectEqual(16 + 1, hs.weight_functions[0].len);
+    try t.expectEqual(32 + 1, hs.weight_functions[1].len);
+    try t.expectEqual(16 + 1, hs.weight_functions[2].len);
 }
 
 const WeightIntegral = struct {
     /// The expansion coefficients of density-independent weights over the grid
-    /// combinations, or w_i(|r - r'|)
-    /// [0]: weightFn0, [1]: weightFn1 (unified), [2]: weightFn2
+    /// combinations, or w_i(|r - r'|), weighted by integration weights
     kernels: [3]conv.Kernel,
-
-    /// Reference to the grid
-    grid: Grid,
-
-    /// Reference to the hard sphere DFT
-    hs: HardSphereDFT,
-
-    /// Allocator for memory management
-    allocator: std.mem.Allocator,
 
     const Self = @This();
 
-    pub fn init(allocator: std.mem.Allocator, grid: Grid, hs: HardSphereDFT) !Self {
-        const n = grid.points.len;
+    pub fn init(allocator: std.mem.Allocator, hs: HardSphereDFT, grid: Grid) !Self {
         var kernels: [3]conv.Kernel = undefined;
-        const weight_fns = hs.getWeightFns();
-
-        var simpson_weights: [3]conv.Weights = undefined;
-        for (0..3) |k| {
-            const weight_fn = weight_fns[k];
-            // Convert relative distances to actual grid indices: distance * GRID_PPD
-            var grid_nodes: [3]usize = undefined;
-            for (weight_fn.nodes, 0..) |relative_dist, idx| {
-                grid_nodes[idx] = relative_dist * GRID_PPD;
-            }
-            const actual_nodes = grid_nodes[0..weight_fn.nodes.len];
-
-            // Always use Simpson weights since kernel_size is always 2n+1 with GRID_PPD=16
-            simpson_weights[k] = try conv.Weights.init(.simpson, allocator, actual_nodes, grid.spacing);
-        }
-        defer for (0..3) |k| simpson_weights[k].deinit(allocator);
-
-        // Create the three kernels
         for (0..3) |i| {
-            const weight_fn = weight_fns[i];
-            const max_distance = weight_fn.nodes[weight_fn.nodes.len - 1];
-            const kernel_size = max_distance * GRID_PPD + 1;
+            const simpson_weights = try conv.RadialWeights.init(
+                .simpson,
+                allocator,
+                hs.weight_functions[i].len,
+                grid.spacing,
+            );
+            defer simpson_weights.deinit(allocator);
 
-            var kernel_values = try allocator.alloc(f64, kernel_size);
-            defer allocator.free(kernel_values);
-
-            for (0..kernel_size) |offset| {
-                const distance = grid.spacing * @as(f64, @floatFromInt(offset));
-                kernel_values[offset] = weight_fn.ptr(hs, distance);
-            }
-
-            kernels[i] = try conv.Kernel.init(allocator, kernel_values, n, simpson_weights[i]);
+            kernels[i] = try conv.Kernel.init(
+                allocator,
+                hs.weight_functions[i],
+                grid.points.len,
+                simpson_weights,
+            );
         }
-
-        return Self{
-            .kernels = kernels,
-            .grid = grid,
-            .hs = hs,
-            .allocator = allocator,
-        };
+        return Self{ .kernels = kernels };
     }
 
-    pub fn deinit(self: *Self) void {
+    pub fn deinit(self: Self, allocator: std.mem.Allocator) void {
         // Free weight kernels
         for (0..3) |i| {
-            self.kernels[i].deinit(self.allocator);
+            self.kernels[i].deinit(allocator);
         }
     }
 };
 
 test "WeightIntegral init" {
     const allocator = t.allocator;
-    const hs = HardSphereDFT.init(1.0);
+
+    const hs = try HardSphereDFT.init(allocator, 1.0);
+    defer hs.deinit(allocator);
+
     var grid = try Grid.init(allocator, hs.resolution, 5.0);
     defer grid.deinit();
-    var kernel = try WeightIntegral.init(allocator, grid, hs);
-    defer kernel.deinit();
+
+    var kernel = try WeightIntegral.init(allocator, hs, grid);
+    defer kernel.deinit(allocator);
 }
 
 pub const HardSphereWorkspace = struct {
@@ -310,9 +204,79 @@ pub const HardSphereWorkspace = struct {
 
 test "HardSphereWorkspace init" {
     const allocator = t.allocator;
-    const hs = HardSphereDFT.init(1.0);
+
+    const hs = try HardSphereDFT.init(allocator, 1.0);
+    defer hs.deinit(allocator);
+
     var grid = try Grid.init(allocator, hs.resolution, 5.0);
     defer grid.deinit();
+
     var workspace = try HardSphereWorkspace.init(allocator, grid, hs);
     defer workspace.deinit();
+}
+
+fn weightFn0(sigma: f64, r: f64) f64 {
+    if (r > sigma) return 0.0;
+
+    const sigma3 = math.pow(f64, sigma, 3);
+    const pi = math.pi;
+
+    return 3 / (4 * pi * sigma3);
+}
+
+fn weightFn1(sigma: f64, r: f64) f64 {
+    const x = r / sigma;
+    const x2 = math.pow(f64, x, 2);
+    const x3 = math.pow(f64, x, 3);
+
+    if (r <= sigma) {
+        const a_0 = 0.90724;
+        const a_1 = -1.23717;
+        const a_2 = 0.21616;
+
+        return a_0 + a_1 * x + a_2 * x2;
+    } else {
+        const c = -0.10244;
+        const b_0 = 35.134;
+        const alpha = 4.934;
+        const b_1 = -98.684;
+        const beta_1 = 3.5621;
+        const b_2 = 92.693;
+        const beta_2 = 12.0;
+        const b_3 = -29.257;
+
+        const first = c * @exp(-beta_1 * (x - 1.0)) * @sin(alpha * (x - 1.0));
+        const second = @exp(-beta_2 * (x - 1.0)) * (b_0 + b_1 * x + b_2 * x2 + b_3 * x3);
+
+        return first + second;
+    }
+}
+
+test "weightFn1" {
+    try t.expectApproxEqAbs(0.90724, weightFn1(1.0, 0), 1e-5);
+
+    // Should be positive deep inside the sphere
+    try t.expect(weightFn1(1.0, 0.5) > 0);
+
+    // Should be negative at contact distance
+    try t.expect(weightFn1(1.0, 1.0) < 0);
+
+    // Test continuity at contact distance
+    const eps = 1e-6;
+    try t.expectApproxEqAbs(weightFn1(1.0, 1.0 - eps), weightFn1(1.0, 1.0 + eps), 1e-3);
+
+    // Test oscillating structure of the tail
+    try t.expect(weightFn1(1.0, 1.5) < 0);
+    try t.expect(weightFn1(1.0, 2.0) > 0);
+    try t.expect(weightFn1(1.0, 2.5) < 0);
+}
+
+fn weightFn2(sigma: f64, r: f64) f64 {
+    if (r > sigma) return 0.0;
+
+    const x = r / sigma;
+    const x2 = x * x;
+    const pi: f64 = math.pi;
+
+    return 5 / (4 * pi) * (6 - 12 * x + 5 * x2);
 }
