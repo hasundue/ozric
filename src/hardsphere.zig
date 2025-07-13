@@ -20,7 +20,10 @@ pub const HardSphereDFT = struct {
     size: usize,
 
     /// Descritized weight functions over the grid
-    weight_functions: [3][]f64,
+    weights: [3][]f64,
+
+    /// Effective weight functions for 1D integration
+    weights_eff: [3][]f64,
 
     const Self = @This();
 
@@ -34,14 +37,28 @@ pub const HardSphereDFT = struct {
         const size = GRID_PPD;
         const resolution: f64 = diameter / @as(f64, size);
 
-        const weights = .{ weightFn0, weightFn1, weightFn2 };
-        var weight_functions: [3][]f64 = undefined;
+        const weight_fns = .{ weightFn0, weightFn1, weightFn2 };
+
+        var weights: [3][]f64 = undefined;
         inline for (0..3) |i| {
             const support = if (i == 1) 2 else 1;
-            weight_functions[i] = try allocator.alloc(f64, size * support + 1);
-            for (0..weight_functions[i].len) |j| {
+            weights[i] = try allocator.alloc(f64, size * support + 1);
+            for (0..weights[i].len) |j| {
                 const r = @as(f64, @floatFromInt(j)) * resolution;
-                weight_functions[i][j] = weights[i](diameter, r);
+                weights[i][j] = weight_fns[i](diameter, r);
+            }
+        }
+
+        var weights_eff: [3][]f64 = undefined;
+        inline for (0..3) |i| {
+            weights_eff[i] = try allocator.alloc(f64, weights[i].len);
+            @memset(weights_eff[i], 0.0);
+            for (0..weights_eff[i].len) |j| {
+                for (j..weights[i].len - 1) |k| { // exclude the kernel edge
+                    // TODO: Replace with a Simpson integration
+                    weights_eff[i][j] += weights[i][k] * resolution;
+                }
+                weights_eff[i][j] *= 2 * 2 * math.pi * resolution * @as(f64, @floatFromInt(j));
             }
         }
 
@@ -49,13 +66,15 @@ pub const HardSphereDFT = struct {
             .diameter = diameter,
             .resolution = resolution,
             .size = size,
-            .weight_functions = weight_functions,
+            .weights = weights,
+            .weights_eff = weights_eff,
         };
     }
 
     pub fn deinit(self: Self, allocator: std.mem.Allocator) void {
         for (0..3) |i| {
-            allocator.free(self.weight_functions[i]);
+            allocator.free(self.weights[i]);
+            allocator.free(self.weights_eff[i]);
         }
     }
 };
@@ -67,40 +86,50 @@ test "HardSphereDFT init" {
     try t.expectEqual(1.0, hs.diameter);
     try t.expectEqual(1.0 / 16.0, hs.resolution);
     try t.expectEqual(16, hs.size);
-    try t.expectEqual(16 + 1, hs.weight_functions[0].len);
-    try t.expectEqual(32 + 1, hs.weight_functions[1].len);
-    try t.expectEqual(16 + 1, hs.weight_functions[2].len);
+    try t.expectEqual(16 + 1, hs.weights[0].len);
+    try t.expectEqual(32 + 1, hs.weights[1].len);
+    try t.expectEqual(16 + 1, hs.weights[2].len);
+    try t.expectEqual(16 + 1, hs.weights_eff[0].len);
+    try t.expectEqual(32 + 1, hs.weights_eff[1].len);
+    try t.expectEqual(16 + 1, hs.weights_eff[2].len);
+
+    std.debug.print("weights[0]: {any}\n", .{hs.weights[0]});
+    std.debug.print("weights_eff[0]: {any}\n", .{hs.weights_eff[0]});
 }
 
-const WeightIntegral = struct {
-    kernels: [3]conv.RadialKernel,
+const Kernels = struct {
+    /// Convolution kernels for the weight functions
+    weights: [3]conv.RadialKernel,
+
+    /// Convolution kernel for the excess chemical potential term
+    // excess: conv.RadialKernel,
 
     const Self = @This();
 
     pub fn init(allocator: std.mem.Allocator, hs: HardSphereDFT, grid: Grid) !Self {
-        var kernels: [3]conv.RadialKernel = undefined;
+        var weights: [3]conv.RadialKernel = undefined;
         for (0..3) |i| {
             const simpson_weights = try conv.RadialWeights.init(
                 .simpson,
                 allocator,
-                hs.weight_functions[i].len,
+                hs.weights_eff[i].len,
                 grid.spacing,
             );
             defer simpson_weights.deinit(allocator);
 
-            kernels[i] = try conv.RadialKernel.init(
+            weights[i] = try conv.RadialKernel.init(
                 allocator,
-                hs.weight_functions[i],
+                hs.weights_eff[i],
                 grid.points.len,
                 simpson_weights,
             );
         }
-        return Self{ .kernels = kernels };
+        return Self{ .weights = weights };
     }
 
     pub fn deinit(self: Self, allocator: std.mem.Allocator) void {
         for (0..3) |i| {
-            self.kernels[i].deinit(allocator);
+            self.weights[i].deinit(allocator);
         }
     }
 };
@@ -114,13 +143,13 @@ test "WeightIntegral init" {
     var grid = try Grid.init(allocator, hs.resolution, 5.0);
     defer grid.deinit();
 
-    var kernel = try WeightIntegral.init(allocator, hs, grid);
+    var kernel = try Kernels.init(allocator, hs, grid);
     defer kernel.deinit(allocator);
 }
 
 const WeightedDensity = struct {
     density: []f64,
-    expansion: [3][]f64,
+    expansions: [3][]f64,
 
     const Self = @This();
 
@@ -130,25 +159,25 @@ const WeightedDensity = struct {
         for (0..3) |i| expansion[i] = try allocator.alloc(f64, n);
         return Self{
             .density = try allocator.alloc(f64, n),
-            .expansion = expansion,
+            .expansions = expansion,
         };
     }
 
     pub fn deinit(self: *Self, allocator: std.mem.Allocator) void {
         allocator.free(self.density);
-        for (0..3) |i| allocator.free(self.expansion[i]);
+        for (0..3) |i| allocator.free(self.expansions[i]);
     }
 
     pub fn update(
         self: Self,
         density: []const f64,
-        integral: WeightIntegral,
+        integral: Kernels,
     ) void {
         // const n = self.density.len;
         // const size = integral.kernels[0].size;
 
         inline for (0..3) |i| {
-            integral.kernels[i].convolve(density, self.expansion[i]);
+            integral.weights[i].convolve(density, self.expansions[i]);
         }
     }
 };
@@ -161,17 +190,26 @@ test "WeightedDensity" {
 
     const grid = try Grid.init(allocator, dft.resolution, 5.0);
     defer grid.deinit();
+    const center = grid.points.len / 2 - 1;
 
-    const integral = try WeightIntegral.init(allocator, dft, grid);
+    const integral = try Kernels.init(allocator, dft, grid);
     defer integral.deinit(allocator);
 
-    const weighted = try WeightedDensity.init(allocator, grid);
+    var weighted = try WeightedDensity.init(allocator, grid);
     defer weighted.deinit(allocator);
 
     try t.expectEqual(grid.points.len, weighted.density.len);
     for (0..3) |i| {
-        try t.expectEqual(grid.points.len, weighted.expansion[i].len);
+        try t.expectEqual(grid.points.len, weighted.expansions[i].len);
     }
+
+    const density = try allocator.alloc(f64, grid.points.len);
+    defer allocator.free(density);
+    @memset(density, 0.57);
+
+    weighted.update(density, integral);
+
+    std.debug.print("Weighted density: {}\n", .{weighted.expansions[0][center]});
 }
 
 pub const HardSphereWorkspace = struct {

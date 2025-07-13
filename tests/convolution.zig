@@ -6,7 +6,7 @@ const Allocator = std.mem.Allocator;
 const root = @import("convolution");
 const convolution = root.convolution;
 const Weights = convolution.Weights;
-const Kernel = convolution.Kernel;
+const Kernel = convolution.RadialKernel;
 
 /// Benchmarking function for convolution using dsbmv
 pub fn benchmark_convolution(allocator: Allocator) !void {

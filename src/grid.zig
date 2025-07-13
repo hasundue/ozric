@@ -39,7 +39,7 @@ pub const Grid = struct {
     }
 
     /// Clean up allocated memory
-    pub fn deinit(self: *Self) void {
+    pub fn deinit(self: Self) void {
         self.allocator.free(self.points);
     }
 
