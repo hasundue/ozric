@@ -54,11 +54,14 @@ pub const HardSphereDFT = struct {
             weights_eff[i] = try allocator.alloc(f64, weights[i].len);
             @memset(weights_eff[i], 0.0);
             for (0..weights_eff[i].len) |j| {
-                for (j..weights[i].len - 1) |k| { // exclude the kernel edge
-                    // TODO: Replace with a Simpson integration
-                    weights_eff[i][j] += weights[i][k] * resolution;
+                const r_0: f64 = @as(f64, @floatFromInt(j)) * resolution;
+                for (0..weights[i].len) |k| {
+                    // TODO: Replace with Simpson integration
+                    const u = @as(f64, @floatFromInt(k)) * resolution;
+                    const r = math.pow(f64, r_0, 2) + u;
+                    weights_eff[i][j] += weight_fns[i](diameter, math.sqrt(r));
                 }
-                weights_eff[i][j] *= 2 * 2 * math.pi * resolution * @as(f64, @floatFromInt(j));
+                weights_eff[i][j] *= math.pi * resolution;
             }
         }
 
@@ -93,8 +96,9 @@ test "HardSphereDFT init" {
     try t.expectEqual(32 + 1, hs.weights_eff[1].len);
     try t.expectEqual(16 + 1, hs.weights_eff[2].len);
 
-    std.debug.print("weights[0]: {any}\n", .{hs.weights[0]});
     std.debug.print("weights_eff[0]: {any}\n", .{hs.weights_eff[0]});
+    std.debug.print("weights_eff[1]: {any}\n", .{hs.weights_eff[1]});
+    std.debug.print("weights_eff[2]: {any}\n", .{hs.weights_eff[2]});
 }
 
 const Kernels = struct {
@@ -209,7 +213,9 @@ test "WeightedDensity" {
 
     weighted.update(density, integral);
 
-    std.debug.print("Weighted density: {}\n", .{weighted.expansions[0][center]});
+    std.debug.print("w[0]: {}\n", .{weighted.expansions[0][center]});
+    std.debug.print("w[1]: {}\n", .{weighted.expansions[1][center]});
+    std.debug.print("w[2]: {}\n", .{weighted.expansions[2][center]});
 }
 
 pub const HardSphereWorkspace = struct {
