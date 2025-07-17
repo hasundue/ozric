@@ -1,8 +1,9 @@
 const std = @import("std");
 const math = std.math;
 const t = std.testing;
-const conv = @import("convolution.zig");
 
+const array = @import("array.zig");
+const conv = @import("convolution.zig");
 const Grid = @import("grid.zig").Grid;
 
 pub const HardSphereOptions = struct {
@@ -32,8 +33,9 @@ pub const HardSphereDFT = struct {
         allocator: std.mem.Allocator,
         diameter: f64,
     ) !Self {
-        const size = GRID_PPD;
-        const resolution: f64 = diameter / @as(f64, size);
+        const radius = diameter / 2.0;
+        const size = GRID_PPD / 2;
+        const resolution: f64 = radius / @as(f64, size);
 
         var weights: [3][]f64 = undefined;
         inline for (0..3) |i| {
@@ -43,10 +45,10 @@ pub const HardSphereDFT = struct {
             const i_ = @as(f64, @floatFromInt(i));
             const z = i_ * resolution;
             const x = i_ / @as(f64, size);
-            weights[0][i] = math.pi * diameter * diameter * (1.0 - x * x);
+            weights[0][i] = math.pi * radius * radius * (1.0 - x * x);
             weights[2][i] = 2.0 * math.pi * z;
         }
-        @memset(weights[1], 2.0 * math.pi * diameter);
+        @memset(weights[1], 2.0 * math.pi * radius);
 
         return Self{
             .diameter = diameter,
@@ -69,10 +71,10 @@ test "HardSphereDFT.init" {
 
     try t.expectEqual(1.0, hs.diameter);
     try t.expectEqual(1.0 / 16.0, hs.resolution);
-    try t.expectEqual(16, hs.size);
-    try t.expectEqual(16 + 1, hs.weights[0].len);
-    try t.expectEqual(16 + 1, hs.weights[1].len);
-    try t.expectEqual(16 + 1, hs.weights[2].len);
+    try t.expectEqual(8, hs.size);
+    try t.expectEqual(8 + 1, hs.weights[0].len);
+    try t.expectEqual(8 + 1, hs.weights[1].len);
+    try t.expectEqual(8 + 1, hs.weights[2].len);
 }
 
 const Kernels = struct {
@@ -125,7 +127,6 @@ test "Kernels.init" {
 
 const WeightedDensity = struct {
     data: []f64,
-    grid: Grid,
 
     const Self = @This();
 
@@ -133,7 +134,6 @@ const WeightedDensity = struct {
         const n = grid.points.len;
         return Self{
             .data = try allocator.alloc(f64, 3 * n),
-            .grid = grid,
         };
     }
 
@@ -172,11 +172,85 @@ test "WeightedDensity" {
 
     const density = try allocator.alloc(f64, grid.points.len);
     defer allocator.free(density);
-    @memset(density, 1.0);
+    @memset(density, 0.57);
 
     weighted.update(density, integral);
 
     std.debug.print("w[0]: {}\n", .{weighted.data[center]});
     std.debug.print("w[1]: {}\n", .{weighted.data[n + center]});
     std.debug.print("w[2]: {}\n", .{weighted.data[2 * n + center]});
+}
+
+const DirectCorrelation = struct {
+    data: [][]f64,
+    hs: HardSphereDFT,
+
+    const Self = @This();
+
+    pub fn init(allocator: std.mem.Allocator, hs: HardSphereDFT, grid: Grid) !Self {
+        const n = grid.points.len;
+        const self = Self{
+            .data = try array.allocArraySeries(f64, allocator, 5, n),
+            .hs = hs,
+        };
+        return self;
+    }
+
+    pub fn deinit(self: *Self, allocator: std.mem.Allocator) void {
+        array.freeArraySeries(f64, allocator, self.data);
+    }
+
+    pub fn update(
+        self: Self,
+        weighted_density: WeightedDensity,
+    ) void {
+        const n = self.data[0].len;
+        const radius = self.hs.diameter / 2.0;
+        const r = 4.0 * math.pi * radius;
+        const a = r * radius;
+        for (0..n) |i| {
+            const n3 = weighted_density.data[i];
+            const n2 = weighted_density.data[n + i];
+            // const v2 = weighted_density.data[2 * n + i];
+            const n1 = n2 / r;
+            const n0 = n2 / a;
+            // const v1 = v2 / r;
+            const d3 = 1.0 - n3;
+            self.data[0][i] = -1.0 * @log(d3);
+            self.data[1][i] = n2 / d3;
+            self.data[2][i] = n1 / d3 + 3.0 * n2 * n2 / (24.0 * math.pi) / d3 / d3;
+            self.data[3][i] = n0 / d3 + n1 * n2 / d3 / d3 + n2 * n2 * n2 / 12.0 / d3 / d3 / d3;
+        }
+    }
+};
+
+test "DirectCorrelation" {
+    const allocator = t.allocator;
+
+    const dft = try HardSphereDFT.init(allocator, 1.0);
+    defer dft.deinit(allocator);
+
+    const grid = try Grid.init(allocator, dft.resolution, 5.0);
+    defer grid.deinit();
+    const n = grid.points.len;
+
+    const integral = try Kernels.init(allocator, dft, grid);
+    defer integral.deinit(allocator);
+
+    var weighted = try WeightedDensity.init(allocator, grid);
+    defer weighted.deinit(allocator);
+
+    const density = try allocator.alloc(f64, grid.points.len);
+    defer allocator.free(density);
+    @memset(density, 0.57);
+
+    weighted.update(density, integral);
+
+    var correlation = try DirectCorrelation.init(allocator, dft, grid);
+    defer correlation.deinit(allocator);
+
+    correlation.update(weighted);
+
+    std.debug.print("c[0]: {}\n", .{correlation.data[0][n / 2]});
+    std.debug.print("c[1]: {}\n", .{correlation.data[1][n / 2]});
 }
